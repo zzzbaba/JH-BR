@@ -1,0 +1,44 @@
+name: 每日自检
+
+# 北京时间 04:00 跑一遍八套测试，失败自动开 Issue。
+# 想改成「每次 push 也跑」就把下面的 push 段取消注释（会多消耗 Actions 额度）。
+
+on:
+  schedule:
+    - cron: '0 20 * * *'
+  workflow_dispatch:
+  # push:
+  #   branches: [main]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: daily-test
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 跑八套测试
+        run: bash .github/scripts/run-tests.sh
+
+      - name: 失败时开 Issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python3 .github/scripts/open-issue.py

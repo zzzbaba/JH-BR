@@ -1,0 +1,68 @@
+name: 打包部署包
+
+# 两种触发方式：
+#   1. Actions 页面点「Run workflow」，版本号留空则用 build-日期时间
+#   2. 推一个 v* 的 tag（git tag v1.0.0 && git push origin v1.0.0）
+#
+# 产物挂在 Release 上，Mac mini 那边可以直接拉：
+#   gh release download --repo zzzbaba/JH-BR --pattern '*.zip'
+# 或带 token：
+#   curl -L -H "Authorization: Bearer $TOKEN" \
+#     https://github.com/zzzbaba/JH-BR/releases/latest/download/jianghan-br-deploy.zip -o deploy.zip
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '版本号（留空则用 build-日期时间）'
+        required: false
+        type: string
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: 打包
+        run: bash build-deploy.sh
+
+      - name: 检查产物
+        run: |
+          ls -lh jianghan-br-deploy.zip
+          echo "--- 包内文件（尾部）---"
+          unzip -l jianghan-br-deploy.zip | tail -n 10
+
+      - name: 发布 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="${{ inputs.tag }}"
+            if [ -z "$TAG" ]; then
+              TAG="build-$(date -u +%Y%m%d-%H%M)"
+            fi
+          fi
+          echo "发布版本：$TAG"
+          gh release create "$TAG" jianghan-br-deploy.zip \
+            --title "$TAG" \
+            --notes "自动构建的部署包 · $(date -u '+%Y-%m-%d %H:%M UTC')" \
+            --target "${{ github.sha }}"
+          echo "固定下载地址："
+          echo "https://github.com/${{ github.repository }}/releases/latest/download/jianghan-br-deploy.zip"
