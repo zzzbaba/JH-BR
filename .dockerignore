@@ -1,0 +1,29 @@
+# 不进镜像的东西
+store/
+shots/
+.workbuddy-ai/
+.git/
+.gitignore
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# 测试与调试脚本
+test.js
+test2.js
+test3.js
+test4.js
+api-test.js
+api-test2.js
+api-test3.js
+api-test4.js
+pvp-test.js
+ui-test.js
+debug.js
+_boxdbg.js
+_ui2.js
+shot*.js
+
+# 文档
+*.md
+start.bat

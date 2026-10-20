@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>江汉BR</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%230b0909'/%3E%3Crect x='4' y='4' width='8' height='8' fill='%23c8453a'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css?v=20261019w">
+</head>
+<body>
+
+<!-- ============ 登录 ============ -->
+<div id="loginScreen" class="screen">
+  <div class="login-box">
+    <div class="logo">
+      <div class="logo-mark">
+        <svg viewBox="0 0 48 48" width="56" height="56" shape-rendering="crispEdges">
+          <rect x="0" y="0" width="48" height="48" fill="#120d0d"/>
+          <rect x="1" y="1" width="46" height="46" fill="none" stroke="#c8453a" stroke-width="2"/>
+          <polygon points="24,10 19,33 29,33" fill="none" stroke="#c8453a" stroke-width="2"/>
+          <rect x="20" y="20" width="8" height="2" fill="#7d2620"/>
+          <rect x="19" y="26" width="10" height="2" fill="#7d2620"/>
+          <rect x="13" y="33" width="22" height="3" fill="#c8453a"/>
+          <rect x="23" y="6" width="2" height="4" fill="#ef7264"/>
+          <rect x="7" y="39" width="34" height="2" fill="#7d2620"/>
+        </svg>
+      </div>
+      <div class="logo-text">
+        <div class="logo-line1">江汉<span class="br">BR</span></div>
+        <div class="logo-line2">BATTLE ROYALE</div>
+      </div>
+    </div>
+    <div class="logo-sub">64 区块 · 一个出口</div>
+
+    <div class="tabs">
+      <button class="tab active" data-tab="login">登录</button>
+      <button class="tab" data-tab="register">注册</button>
+    </div>
+
+    <div class="form">
+      <label>账号</label>
+      <input id="inUser" type="text" maxlength="16" autocomplete="username" placeholder="2-16 位">
+      <label>密码</label>
+      <input id="inPass" type="password" maxlength="32" autocomplete="current-password" placeholder="至少 4 位">
+      <button id="btnAuth" class="btn primary big">进入油田</button>
+      <div id="authMsg" class="msg"></div>
+    </div>
+
+    <div class="login-foot">
+      数据保存在本地 store/ 目录，纯文件存储，方便调试。
+    </div>
+  </div>
+</div>
+
+<!-- ============ 等待开局 / 轮次结束 ============ -->
+<div id="waitScreen" class="screen hidden">
+  <div class="wait-box">
+    <div class="wait-title" id="waitTitle">等待开局</div>
+    <div class="wait-sub" id="waitSub"></div>
+    <div class="wait-body" id="waitBody"></div>
+    <div class="wait-actions" id="waitActions"></div>
+  </div>
+</div>
+
+<!-- ============ 游戏 ============ -->
+<div id="gameScreen" class="screen hidden">
+  <header class="topbar">
+    <div class="brand">江汉<span class="br">BR</span></div>
+    <div class="topstat">
+      <span class="round-pill" id="roundPill"><i class="dot"></i><b id="tRound">R0</b> <span id="tLeft">--:--</span></span>
+      <span class="weather-pill" id="weatherPill">☀ 晴</span>
+      <span class="gold-pill" id="tGold">¥100</span>
+      <span>回合 <b id="tTurn">0</b></span>
+      <span>击杀 <b id="tKills">0</b></span>
+      <span id="tUser" class="dim"></span>
+      <button id="btnLogout" class="btn tiny">登出</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- ========== 左栏：人物 ========== -->
+    <aside class="col-left">
+      <div class="card">
+        <div class="card-title">状态 <span class="lv-badge" id="lvBadge">Lv.1</span> <span id="invTag" class="inv-tag hidden">无敌</span></div>
+        <div class="hero-card">
+          <div class="hero-stage" id="heroStage"><span class="hs-face" id="heroFace">正常</span></div>
+          <div class="hero-meta">
+            <div class="vital">
+              <div class="vital-label"><span>生命</span><span id="hpTxt">0/0</span></div>
+              <div class="bar"><div id="hpBar" class="bar-fill hp"></div></div>
+            </div>
+            <div class="vital">
+              <div class="vital-label"><span>精力</span><span id="epTxt">0/0</span></div>
+              <div class="bar"><div id="epBar" class="bar-fill ep"></div></div>
+            </div>
+            <div class="lv-row">
+              <span class="lv-label">经验</span>
+              <div class="lv-bar"><div id="lvExpBar"></div></div>
+              <span class="lv-txt" id="lvExpTxt">0/40</span>
+            </div>
+          </div>
+        </div>
+        <div class="combat-grid">
+          <div class="combat-cell"><span>攻击</span><b id="cAtk">0</b></div>
+          <div class="combat-cell"><span>防御</span><b id="cDef">0</b></div>
+          <div class="combat-cell"><span>命中</span><b id="cHit">0%</b></div>
+          <div class="combat-cell"><span>暴击</span><b id="cCrit">0%</b></div>
+        </div>
+        <div class="wpn-strip">
+          <span class="wpn-name" id="wpnName">空手</span>
+          <div class="wpn-bar"><div id="wpnDurBar"></div></div>
+          <span class="wpn-dur" id="wpnDurTxt">—</span>
+          <button id="btnMod" class="btn tiny">改装</button>
+        </div>
+        <div class="mini-row">
+          <span class="host-link" id="hostLink" data-tip="hostages">随行 <b id="hostVal">0</b></span>
+          <span>金币 <b id="goldVal">0</b></span>
+        </div>
+        <div class="status-row">
+          <span class="status-tag" id="statusTag">正常</span>
+          <span class="status-left" id="statusLeft"></span>
+          <span class="status-desc" id="statusDesc"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">属性</div>
+        <div id="attrList" class="attr-list"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">装备</div>
+        <div id="equipList" class="equip-list"></div>
+        <div class="equip-foot" id="equipFoot"></div>
+      </div>
+    </aside>
+
+    <!-- ========== 中栏：地图 ========== -->
+    <section class="col-center">
+      <div class="map-wrap">
+        <canvas id="map" width="800" height="800"></canvas>
+        <canvas id="wx" width="800" height="800"></canvas>
+        <div id="mapTip" class="map-tip hidden"></div>
+        <div id="bossMark" class="boss-mark hidden">BOSS</div>
+      </div>
+      <div class="zone-bar">
+        <div class="zone-head">
+          <span id="zRegion" class="region-tag">十号地</span>
+          <span id="zName" class="zone-name">十号地</span>
+          <span id="zShop" class="shop-tag hidden">商人</span>
+          <span id="zSupply" class="supply-tag hidden">空投</span>
+          <span id="zDanger" class="danger">危险 1</span>
+        </div>
+        <div id="zDesc" class="zone-desc"></div>
+        <div class="zone-actions">
+          <button id="btnExplore" class="btn">探索此地 <em>-3 精力</em></button>
+          <button id="btnRest" class="btn">原地休息 <em>+精力 / 有风险</em></button>
+          <button id="btnShop" class="btn hidden">商店</button>
+          <button id="btnNpc" class="btn hidden">交谈</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== 右栏：交互 ========== -->
+    <aside class="col-right">
+      <div class="card grow">
+        <div class="card-title tabbed">
+          <button class="ctab active" data-ctab="log">记录</button>
+          <button class="ctab" data-ctab="chat">聊天</button>
+          <button class="ctab" data-ctab="rank">排行</button>
+        </div>
+        <div id="paneLog" class="pane"><div id="logList" class="log-list"></div></div>
+        <div id="paneChat" class="pane hidden">
+          <div class="chat-tabs">
+            <button class="chtab active" data-ch="public">公共</button>
+            <button class="chtab" data-ch="zone">区块</button>
+            <button class="chtab" data-ch="private">私聊</button>
+          </div>
+          <div id="chatList" class="chat-list"></div>
+          <div class="chat-input">
+            <input id="chatText" type="text" maxlength="200" placeholder="说点什么…（@玩家ID 私聊）">
+            <button id="btnSend" class="btn tiny">发送</button>
+          </div>
+        </div>
+        <div id="paneRank" class="pane hidden"><div id="rankList" class="rank-list"></div></div>
+      </div>
+
+      <div class="bottom-btns">
+        <button id="btnBag" class="btn">背包 <em id="bagCount">0/32</em></button>
+        <button id="btnCraft" class="btn craft-btn" data-tip="craft">合成<span class="craft-dot hidden" id="craftDot"></span></button>
+        <button id="btnAch" class="btn">称号 <em id="achCount">0</em></button>
+        <button id="btnTrade" class="btn">交易</button>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<!-- ============ 弹窗层 ============ -->
+<div id="modal" class="modal hidden">
+  <div id="modalBox" class="modal-box"></div>
+</div>
+
+<!-- 道具悬浮说明 -->
+<div id="fxFlash"></div>
+<div id="tip" class="tip hidden"></div>
+
+<script src="pixel.js?v=20261019w"></script>
+<script src="app.js?v=20261019w"></script>
+</body>
+</html>

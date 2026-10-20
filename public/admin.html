@@ -1,0 +1,1274 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>江汉BR · 后台</title>
+<style>
+:root{--bg:#0f110c;--panel:#1c2018;--panel2:#232820;--line:#3d4536;--line2:#55604a;--text:#d9d5c2;--dim:#8a8a76;--accent:#d4a340;--accent2:#8c6a20;--good:#7aa84f;--bad:#c0563f;--ep:#3b7ea1}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:"Courier New","Microsoft YaHei",monospace;font-size: clamp(16.1px, 1.150vw, 22px);padding:0}
+.hidden{display:none!important}
+button,input,select,textarea{font-family:inherit;font-size: clamp(16.1px, 1.150vw, 22px)}
+button{background:var(--panel2);color:var(--text);border:2px solid var(--line2);padding:6px 12px;cursor:pointer}
+button:hover{background:var(--line);border-color:var(--accent)}
+button.primary{background:var(--accent2);border-color:var(--accent);color:#12140f;font-weight:bold}
+button.primary:hover{background:var(--accent)}
+button.danger{border-color:#6b2f22;color:#d98b76}
+button.danger:hover{background:#4a2018}
+input,select{background:#0a0c07;color:var(--text);border:2px solid var(--line);padding:5px 8px;outline:none;width:100%}
+input:focus,select:focus{border-color:var(--accent)}
+
+#login{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--bg)}
+.login-box{width:340px;padding:26px;background:var(--panel);border:2px solid var(--line2);box-shadow:0 0 0 4px var(--bg),0 0 0 6px var(--line)}
+.login-box h1{font-size: clamp(24.2px, 1.725vw, 34px);letter-spacing:4px;color:var(--accent);text-align:center;margin-bottom:6px}
+.login-box p{font-size: clamp(14.4px, 1.027vw, 20px);color:var(--dim);text-align:center;margin-bottom:20px}
+.login-box label{display:block;font-size: clamp(14.4px, 1.027vw, 20px);color:var(--dim);margin:10px 0 5px}
+.msg{min-height:18px;font-size: clamp(15px, 1.068vw, 21px);color:var(--bad);margin-top:10px}
+
+header{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:var(--panel);border-bottom:2px solid var(--line);position:sticky;top:0;z-index:20}
+header h1{font-size: clamp(19.5px, 1.396vw, 27px);letter-spacing:3px;color:var(--accent);font-weight:normal}
+.hstat{display:flex;gap:18px;font-size: clamp(15px, 1.068vw, 21px);color:var(--dim);align-items:center}
+.hstat b{color:var(--text)}
+.dot{display:inline-block;width:8px;height:8px;margin-right:5px;vertical-align:middle}
+.dot.run{background:var(--good);box-shadow:0 0 6px var(--good)}
+.dot.idle{background:var(--dim)}
+.dot.end{background:var(--bad)}
+
+.tabs{display:flex;gap:4px;padding:10px 16px 0}
+.tabs button{padding:7px 16px;border-bottom:none}
+.tabs button.active{background:var(--accent2);border-color:var(--accent);color:#12140f;font-weight:bold}
+
+main{padding:14px 16px 40px}
+.card{background:var(--panel);border:2px solid var(--line);margin-bottom:12px}
+.card h2{font-size: clamp(15px, 1.068vw, 21px);letter-spacing:2px;color:var(--accent2);padding:9px 12px;border-bottom:1px dashed var(--line);font-weight:normal}
+.card .body{padding:12px}
+
+table{width:100%;border-collapse:collapse;font-size: clamp(15px, 1.068vw, 21px)}
+th{text-align:left;color:var(--dim);font-weight:normal;font-size: clamp(14.4px, 1.027vw, 20px);padding:6px 8px;border-bottom:1px solid var(--line);letter-spacing:1px}
+td{padding:6px 8px;border-bottom:1px dotted #262b20}
+tr:hover td{background:#181c14;cursor:pointer}
+tr.sel td{background:#232a1c}
+.tag{display:inline-block;padding:1px 6px;font-size: clamp(13.8px, 0.986vw, 19px);border:1px solid var(--line2);color:var(--dim)}
+.tag.alive{color:var(--good);border-color:#3f5a2c}
+.tag.dead{color:var(--bad);border-color:#6b2f22}
+.tag.gm{color:var(--accent);border-color:var(--accent2)}
+.tag.inv{color:#6fa8d6;border-color:#2d5f7a}
+
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.grid5{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+.field label{display:block;font-size: clamp(13.8px, 0.986vw, 19px);color:var(--dim);margin-bottom:4px;letter-spacing:1px}
+
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.sp{flex:1}
+
+.baglist{max-height:280px;overflow-y:auto;border:1px solid var(--line);background:#0a0c07}
+.bagrow{display:flex;align-items:center;gap:8px;padding:5px 8px;border-bottom:1px dotted #232820;font-size: clamp(15px, 1.068vw, 21px)}
+.bagrow:hover{background:#14170f}
+.bagrow .nm{flex:1}
+.bagrow .qt{color:var(--accent);width:44px;text-align:right}
+.bagrow button{padding:2px 8px;font-size: clamp(14.4px, 1.027vw, 20px)}
+
+.hint{font-size: clamp(14.4px, 1.027vw, 20px);color:#5c604f;line-height:1.6}
+.warnbox{padding:8px 12px;border-left:3px solid var(--accent);background:#1a1a10;font-size: clamp(14.4px, 1.027vw, 20px);color:var(--dim);margin-bottom:10px}
+
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-track{background:#0a0c07}
+::-webkit-scrollbar-thumb{background:var(--line)}
+
+/* 运行状况 */
+.statgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px}
+.statbox{background:#0a0c07;border:1px solid var(--line);padding:9px 11px}
+.statbox span{display:block;font-size: clamp(13.8px, 0.986vw, 19px);color:var(--dim);letter-spacing:1px}
+.statbox b{font-size: clamp(19.5px, 1.396vw, 27px);color:var(--accent);font-weight:normal}
+.heatrow{display:flex;align-items:center;gap:8px;font-size: clamp(15px, 1.068vw, 21px);padding:3px 0}
+.heatrow .hn{width:130px;color:var(--text);white-space:nowrap;overflow:hidden}
+.heatrow .hbar{flex:1;height:9px;background:#0a0c07;border:1px solid var(--line)}
+.heatrow .hbar div{height:100%;background:var(--accent2)}
+.heatrow .hc{width:26px;text-align:right;color:var(--accent)}
+.chatlog{max-height:340px;overflow-y:auto;font-size: clamp(15px, 1.068vw, 21px)}
+.chatrow{display:flex;gap:8px;padding:3px 12px;border-bottom:1px dotted #22261c;line-height:1.5}
+.chatrow .ct{color:#5c604f;flex:0 0 62px}
+.chatrow .cc{color:var(--accent2);flex:0 0 44px}
+.chatrow .cf{color:var(--accent);flex:0 0 110px;overflow:hidden;white-space:nowrap}
+.chatrow .cm{color:var(--text);flex:1;word-break:break-all}
+button.tiny{padding:3px 9px;font-size: clamp(14.4px, 1.027vw, 20px)}
+code{background:#0a0c07;border:1px solid var(--line);padding:1px 5px;color:var(--accent);font-size: clamp(15px, 1.068vw, 21px)}
+
+/* ===== 日志页 ===== */
+.memgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px}
+.membar{display:flex;align-items:flex-end;gap:2px;height:74px;margin-top:12px;border-bottom:1px solid var(--line);padding-bottom:2px}
+.membar i{flex:1;min-width:2px;background:linear-gradient(180deg,#4f8a3a,#2c4a22);display:block;transition:height .2s}
+.membar i.hot{background:linear-gradient(180deg,#c0563f,#6b2f22)}
+.memlegend{display:flex;justify-content:space-between;font-size: clamp(13.8px, 0.986vw, 19px);color:var(--dim);margin-top:5px}
+.memcell{border:1px solid var(--line);padding:7px 9px;background:#141710}
+.memcell .k{font-size: clamp(13.2px, 0.95vw, 18px);color:var(--dim);letter-spacing:1px}
+.memcell .v{font-size: clamp(19.5px, 1.396vw, 27px);color:var(--accent);font-weight:bold;line-height:1.25}
+.memcell .v small{font-size:0.55em;color:var(--dim);font-weight:normal}
+.memcell.bad .v{color:var(--bad)}
+.memcell.warn .v{color:#d98b4a}
+
+.logfilter{display:flex;gap:4px;padding:8px 12px;border-bottom:1px dashed var(--line);flex-wrap:wrap}
+.logfilter .lf{padding:4px 10px;font-size: clamp(14.4px, 1.027vw, 20px);border:1px solid var(--line2);background:#141710;color:var(--dim)}
+.logfilter .lf em{font-style:normal;color:var(--accent);margin-left:4px}
+.logfilter .lf.active{background:var(--accent2);border-color:var(--accent);color:#12140f;font-weight:bold}
+.logfilter .lf.active em{color:#12140f}
+
+.loglist{height:52vh;overflow-y:auto;font-size: clamp(14.4px, 1.027vw, 20px);line-height:1.6;padding:6px 0}
+.logrow{display:flex;gap:8px;padding:2px 12px;border-bottom:1px dotted #22271d;white-space:pre-wrap;word-break:break-word}
+.logrow:hover{background:#181c14}
+.logrow .t{color:#6a6a58;flex:0 0 auto}
+.logrow .tag2{flex:0 0 auto;padding:0 5px;border:1px solid var(--line);color:var(--dim);font-size:0.9em;height:1.5em}
+.logrow .txt{flex:1;min-width:0}
+.logrow.error{background:#1e100d}
+.logrow.error .txt{color:#e8896f}
+.logrow.error .tag2{color:#e8896f;border-color:#6b2f22}
+.logrow.warn .txt{color:#d9b06a}
+.logrow.warn .tag2{color:#d9b06a;border-color:#6b5a22}
+.logrow.sys .txt{color:#8fb8d6}
+.logrow.sys .tag2{color:#8fb8d6;border-color:#2d5f7a}
+.logrow .extra{color:#7a7a68;font-size:0.92em;padding-left:6px}
+.logpause{font-size: clamp(13.2px, 0.95vw, 18px);color:var(--good)}
+.logpause.paused{color:var(--bad)}
+
+</style>
+</head>
+<body>
+
+<div id="login">
+  <div class="login-box">
+    <h1>后 台</h1>
+    <p>江汉BR · 管理员控制台</p>
+    <label>管理员密码</label>
+    <input id="pwd" type="password" placeholder="见 store/admin.json">
+    <button class="primary" style="width:100%;margin-top:16px;padding:9px" id="btnLogin">进入</button>
+    <div class="msg" id="loginMsg"></div>
+    <div class="hint" style="margin-top:14px;text-align:center">默认密码 jianghan，登录后可改</div>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <h1>江汉BR · 后台</h1>
+    <div class="hstat">
+      <span id="roundState"><span class="dot idle"></span>未开始</span>
+      <span>倒计时 <b id="countdown">--:--</b></span>
+      <span>在线角色 <b id="pcount">0</b></span>
+      <button id="btnLogout">退出</button>
+    </div>
+  </header>
+
+  <div class="tabs">
+    <button class="active" data-tab="players">玩家</button>
+    <button data-tab="round">轮次</button>
+    <button data-tab="stats">运行</button>
+    <button data-tab="settings">数值</button>
+    <button data-tab="roundctl">单轮</button>
+    <button data-tab="logs">日志</button>
+    <button data-tab="gm">GM</button>
+  </div>
+
+  <main>
+    <!-- 玩家 -->
+    <section id="tab-players">
+      <div class="card">
+        <h2>玩家列表（点击一行编辑）</h2>
+        <div class="body" style="padding:0">
+          <table>
+            <thead><tr>
+              <th>账号</th><th>角色</th><th>状态</th><th>血量</th><th>精力</th>
+              <th>金币</th><th>位置</th><th>回合</th><th>击杀</th><th>称号</th><th>分数</th><th>强化</th>
+            </tr></thead>
+            <tbody id="playerRows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card hidden" id="editCard">
+        <h2>编辑：<span id="editName"></span></h2>
+        <div class="body">
+          <div class="grid3">
+            <div class="field"><label>角色名</label><input id="f_name"></div>
+            <div class="field"><label>血量</label><input id="f_hp" type="number"></div>
+            <div class="field"><label>精力</label><input id="f_ep" type="number"></div>
+            <div class="field"><label>金币</label><input id="f_gold" type="number"></div>
+            <div class="field"><label>所在区块</label><select id="f_pos"></select></div>
+            <div class="field"><label>存活</label>
+              <select id="f_alive"><option value="1">存活</option><option value="0">出局</option></select>
+            </div>
+          </div>
+
+          <div style="margin-top:12px">
+            <label style="font-size: clamp(13.8px, 0.986vw, 19px);color:var(--dim)">五维属性（1-100，任一项满 100 后其他项在游戏内不可再提升）</label>
+            <div class="grid5" style="margin-top:5px">
+              <div class="field"><label>体力</label><input id="f_sta" type="number" min="1" max="100"></div>
+              <div class="field"><label>武力</label><input id="f_str" type="number" min="1" max="100"></div>
+              <div class="field"><label>魅力</label><input id="f_cha" type="number" min="1" max="100"></div>
+              <div class="field"><label>智力</label><input id="f_int" type="number" min="1" max="100"></div>
+              <div class="field"><label>幸运</label><input id="f_luk" type="number" min="1" max="100"></div>
+            </div>
+          </div>
+
+          <div class="row" style="margin-top:12px">
+            <label class="row" style="gap:5px"><input type="checkbox" id="f_inv" style="width:auto"> 无敌</label>
+            <label class="row" style="gap:5px"><input type="checkbox" id="f_reset" style="width:auto"> 重置到地图状态</label>
+            <div class="sp"></div>
+            <button class="primary" id="btnSavePlayer">保存</button>
+          </div>
+
+          <div style="margin-top:18px;border-top:1px dashed var(--line);padding-top:12px">
+            <div class="row" style="margin-bottom:8px">
+              <strong style="font-size: clamp(15px, 1.068vw, 21px);color:var(--accent2);letter-spacing:2px">战绩</strong>
+              <span class="hint" id="careerInfo"></span>
+            </div>
+          </div>
+
+          <div style="margin-top:18px;border-top:1px dashed var(--line);padding-top:12px">
+            <div class="row" style="margin-bottom:8px">
+              <strong style="font-size: clamp(15px, 1.068vw, 21px);color:var(--accent2);letter-spacing:2px">背包</strong>
+              <span class="hint" id="bagInfo"></span>
+              <div class="sp"></div>
+              <button class="danger" id="btnClearBag">清空背包</button>
+            </div>
+            <div class="row" style="margin-bottom:8px">
+              <select id="addItemSel" style="flex:1"></select>
+              <input id="addItemN" type="number" value="1" min="1" style="width:70px">
+              <button class="primary" id="btnAddItem">添加</button>
+            </div>
+            <div class="baglist" id="bagList"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 轮次 -->
+    <section id="tab-round" class="hidden">
+      <div class="card">
+        <h2>当前轮次</h2>
+        <div class="body">
+          <div class="grid3" style="margin-bottom:14px">
+            <div class="field"><label>轮次编号</label><input id="r_id" readonly></div>
+            <div class="field"><label>状态</label><input id="r_state" readonly></div>
+            <div class="field"><label>剩余</label><input id="r_left" readonly></div>
+          </div>
+          <div class="row">
+            <button class="primary" id="btnStartRound">开始新一轮</button>
+            <button class="danger" id="btnEndRound">提前结束本轮</button>
+            <div class="sp"></div>
+            <span class="hint">每轮 45 分钟；45 分钟到点时若还有人活着，延长到 60 分钟。全员出局 / BOSS 被击杀 / 带走七娃立即结束。</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>空投补给 <span class="hint" id="supplyNext" style="float:right"></span></h2>
+        <div class="body">
+          <div class="row" style="gap:10px;flex-wrap:wrap">
+            <span id="supplyNow" class="hint">当前没有空投</span>
+            <div class="sp"></div>
+            <select id="supplyZone" style="width:190px"></select>
+            <button class="primary" id="btnSupply">立即空投</button>
+          </div>
+          <div class="hint" style="margin-top:8px">自动每 10 分钟一轮，公屏连发三遍。箱子里必有一件史诗装备（武器/防具，稀有度 5）。</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>全服广播</h2>
+        <div class="body">
+          <div class="row">
+            <input id="bcText" placeholder="输入要广播的文字" style="flex:1">
+            <button id="btnBroadcast">发送</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>历史轮次</h2>
+        <div class="body" style="padding:0"><table><thead><tr><th>轮次</th><th>结束原因</th><th>胜者</th><th>前几名</th></tr></thead><tbody id="historyRows"></tbody></table></div>
+      </div>
+    </section>
+
+    <!-- 运行状况 -->
+    <section id="tab-stats" class="hidden">
+      <div class="card">
+        <h2>运行状况</h2>
+        <div class="body"><div class="statgrid" id="statGrid"></div></div>
+      </div>
+
+      <div class="card">
+        <h2>区块分布（本轮玩家所在）</h2>
+        <div class="body" style="padding:10px 12px"><div id="zoneHeat"></div></div>
+      </div>
+
+      <div class="card">
+        <h2>批量操作</h2>
+        <div class="body">
+          <div class="warnbox">影响本轮所有角色。操作立即生效，不可撤销。</div>
+          <div class="row" style="flex-wrap:wrap;gap:8px">
+            <button id="btnHealAll">全服满血复活</button>
+            <input id="gGold" type="number" value="500" style="width:90px">
+            <button id="btnGoldAll">全服发金币</button>
+            <select id="gItem" style="width:190px"></select>
+            <input id="gItemN" type="number" value="1" style="width:64px">
+            <button id="btnItemAll">全服发物品</button>
+            <button id="btnInvAll">全服开无敌</button>
+            <button id="btnInvOff">全服关无敌</button>
+            <button class="danger" id="btnResetAll">清空本轮所有存档</button>
+            <button class="danger" id="btnCleanup">清理旧轮存档</button>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <button class="primary" id="btnExportCsv">导出全服存档 CSV</button>
+            <span class="hint">含账号、角色、位置、五维、武器耐久、称号、背包等 26 列，Excel 可直接打开</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>聊天记录 <button class="tiny danger" id="btnClearChat" style="float:right">清空</button></h2>
+        <div class="body" style="padding:0"><div class="chatlog" id="chatLog"></div></div>
+      </div>
+    </section>
+
+    <!-- 数值 -->
+    <section id="tab-settings" class="hidden">
+      <div class="card">
+        <h2>掉落与收益</h2>
+        <div class="body">
+          <div class="grid2">
+            <div class="field"><label>掉落倍率（0-10，1 = 原版）</label><input id="s_loot" type="number" step="0.1" min="0" max="10"></div>
+            <div class="field"><label>金币收益倍率（0-10）</label><input id="s_gold" type="number" step="0.1" min="0" max="10"></div>
+            <div class="field"><label>商人价格倍率（0.1-5）</label><input id="s_shop" type="number" step="0.1" min="0.1" max="5"></div>
+            <div class="field"><label>初始金币</label><input id="s_startGold" type="number" min="0" max="100000"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>行动与节奏</h2>
+        <div class="body">
+          <div class="grid2">
+            <div class="field"><label>移动精力消耗</label><input id="s_move" type="number" min="1" max="20"></div>
+            <div class="field"><label>探索精力消耗</label><input id="s_explore" type="number" min="1" max="20"></div>
+            <div class="field"><label>状态持续时间（秒）</label><input id="s_statusSec" type="number" min="10" max="3600"></div>
+            <div class="field"><label>七娃跟随概率（%）</label><input id="s_seven" type="number" min="0" max="100"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>战斗与危险</h2>
+        <div class="body">
+          <div class="grid2">
+            <div class="field"><label>遭遇概率倍率（0-5，1 = 原版）</label><input id="s_enc" type="number" step="0.1" min="0" max="5"></div>
+            <div class="field"><label>地雷伤害倍率（0-5）</label><input id="s_mine" type="number" step="0.1" min="0" max="5"></div>
+            <div class="field"><label>最终 BOSS 血量</label><input id="s_bossHp" type="number" min="50" max="99999"></div>
+            <div class="field"><label>最终 BOSS 攻击</label><input id="s_bossAtk" type="number" min="1" max="999"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>开关</h2>
+        <div class="body">
+          <div class="row" style="flex-wrap:wrap;gap:18px">
+            <label class="row" style="gap:5px"><input type="checkbox" id="s_auto" style="width:auto"> 允许玩家点开局时自动开轮</label>
+            <label class="row" style="gap:5px"><input type="checkbox" id="s_bossOn" style="width:auto"> 启用最终 BOSS</label>
+          </div>
+          <div class="row" style="margin-top:14px">
+            <div class="sp"></div>
+            <button class="primary" id="btnSaveSettings">保存全部数值</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>修改管理员密码</h2>
+        <div class="body">
+          <div class="row">
+            <input id="newPwd" type="password" placeholder="新密码（至少 8 位）" style="flex:1">
+            <button id="btnChangePwd">修改</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- 单轮控制 -->
+    <section id="tab-roundctl" class="hidden">
+      <div class="card">
+        <h2>当前轮次 · 区块级控制</h2>
+        <div class="body">
+          <div class="hint" id="rcInfo">加载中…</div>
+          <div class="row" style="margin-top:10px;flex-wrap:wrap;gap:8px">
+            <select id="rcZone" style="flex:1;min-width:180px"></select>
+            <label class="row" style="gap:6px">爆率倍率
+              <input id="rcLoot" type="number" value="1" min="0" max="5" step="0.1" style="width:80px">
+            </label>
+            <label class="row" style="gap:6px">强制事件
+              <select id="rcForce" style="width:120px">
+                <option value="">不强制</option>
+                <option value="box">宝箱</option>
+                <option value="fight">遭遇战</option>
+                <option value="hostage">人质</option>
+                <option value="npc">剧情 NPC</option>
+                <option value="none">无事</option>
+              </select>
+            </label>
+            <label class="row" style="gap:6px">触发概率
+              <input id="rcChance" type="number" value="100" min="0" max="100" style="width:70px">%
+            </label>
+            <button class="primary" id="btnRcSave">应用到这一轮</button>
+          </div>
+          <div class="row" style="margin-top:8px;gap:8px">
+            <button id="btnRcClear">清除选中区块</button>
+            <button class="danger" id="btnRcClearAll">清除全部</button>
+            <span class="hint">只影响正在进行的那一轮，开新一轮自动清空</span>
+          </div>
+          <div id="rcList" style="margin-top:12px"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>假人（仿真玩家，最多 30 个）</h2>
+        <div class="body">
+          <div class="row" style="gap:8px;flex-wrap:wrap">
+            <label class="row" style="gap:6px">投放数量
+              <input id="botN" type="number" value="5" min="1" max="30" style="width:80px">
+            </label>
+            <button class="primary" id="btnBotSpawn">投放</button>
+            <button class="danger" id="btnBotClear">清空全部假人</button>
+            <span class="hint" id="botInfo"></span>
+          </div>
+          <div id="botList" style="margin-top:10px"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 日志 -->
+    <section id="tab-logs" class="hidden">
+      <div class="card">
+        <h2>内存与运行状态 <button class="tiny" id="btnProbe" style="float:right">立即采样</button></h2>
+        <div class="body">
+          <div class="memgrid" id="memNow"></div>
+          <div class="membar" id="memBar" title="最近 40 次采样的堆内存"></div>
+          <div class="memlegend">
+            <span>堆内存趋势（每 5 秒一次，左旧右新）</span>
+            <span id="memPeak"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>实时日志
+          <span style="float:right;display:flex;gap:6px;align-items:center">
+            <span class="logpause" id="logPauseState">滚动中</span>
+            <button class="tiny" id="btnLogPause">暂停</button>
+            <button class="tiny" id="btnReload" title="手改了 store/saves/*.json 之后点这个，不用重启">重载存储</button>
+            <button class="tiny danger" id="btnLogClear">清空</button>
+          </span>
+        </h2>
+        <div class="body" style="padding:0">
+          <div class="logfilter">
+            <button class="lf active" data-lv="all">全部 <em id="cAll">0</em></button>
+            <button class="lf" data-lv="error">错误 <em id="cErr">0</em></button>
+            <button class="lf" data-lv="warn">警告 <em id="cWarn">0</em></button>
+            <button class="lf" data-lv="sys">系统 <em id="cSys">0</em></button>
+            <button class="lf" data-lv="info">信息 <em id="cInfo">0</em></button>
+          </div>
+          <div class="loglist" id="logList"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- GM -->
+    <section id="tab-gm" class="hidden">
+      <div class="card">
+        <h2>GM 命令手册</h2>
+        <div class="body">
+          <div class="warnbox">玩家在游戏聊天框里输入以下命令（必须以 <code>@//gm/</code> 开头）。只有绑定了 GM 的账号生效。</div>
+          <table>
+            <thead><tr><th style="width:290px">命令</th><th>作用</th></tr></thead>
+            <tbody>
+              <tr><td><code>@//gm/ show me the money</code></td><td>金币 +10000</td></tr>
+              <tr><td><code>@//gm/ god bless you</code></td><td>切换无敌状态（免疫一切伤害，再输一次关闭）</td></tr>
+              <tr><td><code>@//gm/ give me 绷带 5</code></td><td>获得指定物品 5 件</td></tr>
+              <tr><td><code>@//gm/ give me 火箭筒</code></td><td>不给数量时默认 1 件</td></tr>
+              <tr><td><code>@//gm/ give me w32</code></td><td>也支持英文 id（w32 = 88式狙击步枪）</td></tr>
+              <tr><td><code>@//gm/ help</code></td><td>列出所有命令</td></tr>
+            </tbody>
+          </table>
+          <div class="hint" style="margin-top:8px">物品名支持模糊匹配，比如「狙击」会匹配到名字最接近的那把枪。</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>代发 GM 命令</h2>
+        <div class="body">
+          <div class="warnbox">管理员可以直接给任意玩家执行 GM 命令，不需要对方有 GM 权限。</div>
+          <div class="row" style="flex-wrap:wrap;gap:8px">
+            <select id="gmTarget" style="width:180px"></select>
+            <input id="gmCmd" placeholder="show me the money" style="flex:1;min-width:220px">
+            <button class="primary" id="btnGmRun">执行</button>
+          </div>
+          <div class="row" style="margin-top:8px;flex-wrap:wrap;gap:6px">
+            <button class="tiny" data-quick="show me the money">+10000 金币</button>
+            <button class="tiny" data-quick="god bless you">切换无敌</button>
+            <button class="tiny" data-quick="give me 急救包 5">给 5 个急救包</button>
+            <button class="tiny" data-quick="give me 88式狙击步枪">给一把狙击枪</button>
+            <button class="tiny" data-quick="give me 战术背囊">给战术背囊</button>
+            <button class="tiny" data-quick="give me 万能解药 3">给 3 瓶万能解药</button>
+          </div>
+          <div class="hint" id="gmResult" style="margin-top:8px"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>GM 账号绑定</h2>
+        <div class="body">
+          <div class="warnbox">绑定后该账号才能在游戏内使用 <code>@//gm/</code> 命令。取消绑定立即生效。</div>
+          <table><thead><tr><th>账号</th><th>GM</th><th>创建时间</th><th></th></tr></thead><tbody id="gmRows"></tbody></table>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let TOKEN = localStorage.getItem('br_admin_token') || '';
+let DATA = null, ITEMS = [], ZONES = [], SEL = null, timer = null;
+
+async function api(path, body) {
+  const r = await fetch(path, {
+    method: body ? 'POST' : 'GET',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + TOKEN },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const j = await r.json();
+  if (r.status === 401) { logout(); throw new Error('登录过期'); }
+  return j;
+}
+
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+$('#btnLogin').onclick = async () => {
+  const j = await api('/api/admin/login', { password: $('#pwd').value });
+  if (!j.ok) { $('#loginMsg').textContent = j.msg; return; }
+  TOKEN = j.token;
+  localStorage.setItem('br_admin_token', TOKEN);
+  boot();
+};
+$('#pwd').addEventListener('keydown', e => { if (e.key === 'Enter') $('#btnLogin').click(); });
+
+function logout() {
+  TOKEN = '';
+  localStorage.removeItem('br_admin_token');
+  $('#app').classList.add('hidden');
+  $('#login').classList.remove('hidden');
+  if (timer) clearInterval(timer);
+}
+$('#btnLogout').onclick = logout;
+
+document.querySelectorAll('.tabs button').forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll('.tabs button').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    ['players','round','stats','settings','roundctl','logs','gm'].forEach(t => $('#tab-' + t).classList.add('hidden'));
+    $('#tab-' + b.dataset.tab).classList.remove('hidden');
+    if (b.dataset.tab === 'stats') { loadStats(); loadChat(); }
+    if (b.dataset.tab === 'roundctl') loadRoundCfg();
+    if (b.dataset.tab === 'logs') startLogPoll();
+    else stopLogPoll();
+  };
+});
+
+
+
+// ===== 日志 =====
+let logSince = 0, logLevel = 'all', logTimer = null, logPaused = false;
+
+function fmtClock(ts) {
+  const d = new Date(ts);
+  const p = n => String(n).padStart(2, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+function fmtUptime(sec) {
+  if (sec < 60) return sec + ' 秒';
+  if (sec < 3600) return Math.floor(sec / 60) + ' 分钟';
+  return Math.floor(sec / 3600) + ' 时 ' + Math.floor((sec % 3600) / 60) + ' 分';
+}
+
+function renderMem(j) {
+  const now = j.now;
+  if (!now) return;
+  const cell = (k, v, unit, cls) =>
+    `<div class="memcell ${cls || ''}"><div class="k">${k}</div><div class="v">${v}<small>${unit}</small></div></div>`;
+  $('#memNow').innerHTML = [
+    cell('堆内存', now.heap, 'MB', now.heap > 300 ? 'bad' : (now.heap > 150 ? 'warn' : '')),
+    cell('RSS', now.rss, 'MB', now.rss > 600 ? 'bad' : (now.rss > 350 ? 'warn' : '')),
+    cell('存档数', now.saves, '个'),
+    cell('聊天缓存', now.chat, '条'),
+    cell('在线', now.online, '人'),
+    cell('日志缓存', now.logs, '条'),
+    cell('运行时长', fmtUptime(now.uptime), ''),
+  ].join('');
+
+  // 堆内存柱状图：取最近 40 个采样
+  const arr = (j.mem || []).slice(-40);
+  // 按实际峰值缩放，否则内存一直很低时柱子会被固定的 60MB 压成一条线
+  const peak = Math.max(1, ...arr.map(m => m.heap));
+  const max = peak * 1.15;
+  $('#memBar').innerHTML = arr.map(m => {
+    const h = Math.max(2, Math.round(m.heap / max * 72));
+    const hot = m.heap > 300 ? ' hot' : '';
+    return `<i class="${hot.trim()}" style="height:${h}px" title="${fmtClock(m.at)} · 堆 ${m.heap}MB / 存档 ${m.saves}"></i>`;
+  }).join('');
+  $('#memPeak').textContent = arr.length
+    ? `峰值 ${Math.max(...arr.map(m => m.heap)).toFixed(1)}MB · 当前 ${now.heap}MB · ${arr.length} 个采样`
+    : '';
+}
+
+function logRow(m) {
+  const extra = m.extra ? `<div class="extra">${esc(m.extra)}</div>` : '';
+  return `<div class="logrow ${m.level}">
+    <span class="t">${fmtClock(m.at)}</span>
+    <span class="tag2">${esc(m.tag)}</span>
+    <span class="txt">${esc(m.text)}${extra}</span>
+  </div>`;
+}
+
+function renderLogs(list, append) {
+  const box = $('#logList');
+  if (!box) return;
+  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 50;
+  const html = list.map(logRow).join('');
+  if (append) box.insertAdjacentHTML('beforeend', html);
+  else box.innerHTML = html;
+  while (box.children.length > 500) box.removeChild(box.firstChild);
+  if (nearBottom && !logPaused) box.scrollTop = box.scrollHeight;
+}
+
+async function pollLogs() {
+  try {
+    const j = await api('/api/admin/logs?since=' + logSince + '&level=' + logLevel);
+    if (!j.ok) return;
+    const c = j.counts || {};
+    $('#cAll').textContent = c.all || 0;
+    $('#cErr').textContent = c.error || 0;
+    $('#cWarn').textContent = c.warn || 0;
+    $('#cSys').textContent = c.sys || 0;
+    $('#cInfo').textContent = c.info || 0;
+    renderMem(j);
+    if (logPaused) return;
+    if (!j.logs || !j.logs.length) return;
+    renderLogs(j.logs, logSince > 0);
+    logSince = j.maxId;
+  } catch (e) { /* 轮询失败忽略 */ }
+}
+
+function startLogPoll() {
+  pollLogs();
+  if (logTimer) clearInterval(logTimer);
+  logTimer = setInterval(pollLogs, 2000);
+}
+function stopLogPoll() {
+  if (logTimer) { clearInterval(logTimer); logTimer = null; }
+}
+
+document.querySelectorAll('.logfilter .lf').forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll('.logfilter .lf').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    logLevel = b.dataset.lv;
+    logSince = 0;              // 换筛选就重新全量拉
+    $('#logList').innerHTML = '';
+    pollLogs();
+  };
+});
+
+$('#btnLogPause').onclick = () => {
+  logPaused = !logPaused;
+  $('#btnLogPause').textContent = logPaused ? '继续' : '暂停';
+  const st = $('#logPauseState');
+  st.textContent = logPaused ? '已暂停' : '滚动中';
+  st.classList.toggle('paused', logPaused);
+  if (!logPaused) { logSince = 0; $('#logList').innerHTML = ''; pollLogs(); }
+};
+
+$('#btnReload').onclick = async () => {
+  if (!confirm('从磁盘重新载入全部存档？内存里未落盘的改动会先写回磁盘。')) return;
+  const j = await api('/api/admin/reload', {});
+  toast(j.ok ? `已重载 ${j.saves} 个存档 / ${j.users} 个账号` : '重载失败');
+  pollLogs();
+};
+
+$('#btnLogClear').onclick = async () => {
+  await api('/api/admin/logs/clear', {});
+  logSince = 0;
+  $('#logList').innerHTML = '';
+  pollLogs();
+};
+
+$('#btnProbe').onclick = async () => {
+  const j = await api('/api/admin/logs/probe', {});
+  if (j.ok) { $('#btnProbe').textContent = '已采样'; setTimeout(() => { $('#btnProbe').textContent = '立即采样'; }, 1200); }
+  pollLogs();
+};
+
+// ===== 单轮控制 =====
+let RC = { zones: [], overrides: {}, bots: [] };
+
+async function loadRoundCfg() {
+  const j = await api('/api/admin/roundcfg');
+  if (!j.ok) return;
+  RC = j;
+  $('#rcInfo').textContent = `第 ${j.round.id} 轮 · ${j.round.state} · 已设 ${Object.keys(j.overrides || {}).length} 个区块`;
+  if (!$('#rcZone').dataset.filled) {
+    $('#rcZone').innerHTML = j.zones.map(z => `<option value="${z.id}">${esc(z.name)}（危险 ${z.danger} · 爆率 ${z.loot}）</option>`).join('');
+    $('#rcZone').dataset.filled = '1';
+  }
+  const ov = j.overrides || {};
+  const keys = Object.keys(ov);
+  $('#rcList').innerHTML = keys.length ? keys.map(k => {
+    const z = j.zones.find(x => x.id === k) || { name: k };
+    const o = ov[k];
+    return `<div class="row" style="border-bottom:1px dotted #262b20;padding:5px 0">
+      <b style="color:var(--accent)">${esc(z.name)}</b>
+      <span class="hint">爆率 ×${o.lootMul} · ${o.force ? '强制 ' + FORCE_CN[o.force] + ' ' + o.forceChance + '%' : '不强制'}</span>
+    </div>`;
+  }).join('') : '<div class="hint">这一轮还没设过区块规则。</div>';
+  $('#botInfo').textContent = `当前 ${j.bots.length} / 30 个假人`;
+  $('#botList').innerHTML = j.bots.length ? j.bots.map(b =>
+    `<span class="tag" style="margin:2px">${esc(b.name)} · ${esc(b.pos)}</span>`).join('') : '<span class="hint">还没有假人</span>';
+}
+
+const FORCE_CN = { box: '宝箱', fight: '遭遇战', hostage: '人质', npc: '剧情 NPC', none: '无事' };
+
+$('#btnRcSave').onclick = async () => {
+  const body = {
+    zone: $('#rcZone').value,
+    lootMul: Number($('#rcLoot').value) || 1,
+    force: $('#rcForce').value,
+    forceChance: Number($('#rcChance').value),
+  };
+  const j = await api('/api/admin/roundcfg', body);
+  toast(j.ok ? '已应用到本轮' : (j.msg || '失败'));
+  if (j.ok) loadRoundCfg();
+};
+$('#btnRcClear').onclick = async () => {
+  const j = await api('/api/admin/roundcfg', { clear: true, zone: $('#rcZone').value });
+  toast(j.ok ? '已清除' : '失败');
+  if (j.ok) loadRoundCfg();
+};
+$('#btnRcClearAll').onclick = async () => {
+  if (!confirm('清除本轮所有区块规则？')) return;
+  const j = await api('/api/admin/roundcfg', { clear: true });
+  toast(j.ok ? '已全部清除' : '失败');
+  if (j.ok) loadRoundCfg();
+};
+$('#btnBotSpawn').onclick = async () => {
+  const j = await api('/api/admin/bots', { action: 'spawn', n: Number($('#botN').value) || 1 });
+  toast(j.ok ? `投放了 ${j.made} 个假人（共 ${j.total}）` : (j.msg || '失败'));
+  if (j.ok) loadRoundCfg();
+};
+$('#btnBotClear').onclick = async () => {
+  if (!confirm('清空所有假人？')) return;
+  const j = await api('/api/admin/bots', { action: 'clear' });
+  toast(j.ok ? `清掉了 ${j.removed} 个假人` : '失败');
+  if (j.ok) loadRoundCfg();
+};
+
+$('#btnCleanup').onclick = async () => {
+  // 先问服务端要准确数字，别让用户盲按
+  let pv;
+  try { pv = await api('/api/admin/cleanup', null); } catch (e) { toast('查不到存档统计'); return; }
+  if (!pv || !pv.ok) { toast('查不到存档统计'); return; }
+  if (!pv.drop) { toast(`很干净：${pv.total} 个存档都在保留范围内`); return; }
+  const extra = pv.recent ? `\n（其中 ${pv.recent} 个是上一轮但 6 小时内还在玩的，也会保留）` : '';
+  if (!confirm(
+    `即将删除 ${pv.drop} 个旧轮存档。\n` +
+    `保留：第 ${pv.round} 轮的 ${pv.keep} 个 + 6 小时内活跃的存档。${extra}\n\n` +
+    `删掉的会先挪进 store/_trash 再后台清空，不影响账号和排行榜历史。\n确定继续？`
+  )) return;
+
+  const btn = $('#btnCleanup');
+  const old = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = `清理中（${pv.drop} 个）…`;
+  try {
+    const j = await api('/api/admin/cleanup', {});
+    toast(j.ok ? (j.msg || `清掉 ${j.removed} 个，保留 ${j.kept} 个`) : '失败');
+  } catch (e) {
+    toast('清理失败：' + (e && e.message ? e.message : '网络异常'));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+    refresh();
+  }
+};
+
+async function boot() {
+  $('#login').classList.add('hidden');
+  $('#app').classList.remove('hidden');
+  const meta = await api('/api/admin/items');
+  ITEMS = meta.items; ZONES = meta.zones;
+  $('#addItemSel').innerHTML = ITEMS.map(i => `<option value="${i.id}">${esc(i.name)}（${i.type}）</option>`).join('');
+  const gItem = $('#gItem');
+  if (gItem) gItem.innerHTML = ITEMS.map(i => `<option value="${i.id}">${esc(i.name)}（${i.type}）</option>`).join('');
+  $('#f_pos').innerHTML = ZONES.map(z => `<option value="${z.id}">${esc(z.name)}（危险${z.danger}）</option>`).join('');
+  const sz = $('#supplyZone');
+  if (sz) sz.innerHTML = '<option value="">随机区块</option>' + ZONES.map(z => `<option value="${z.id}">${esc(z.name)}（危险${z.danger}）</option>`).join('');
+  await refresh();
+  if (timer) clearInterval(timer);
+  timer = setInterval(refresh, 4000);
+}
+
+async function refresh() {
+  try {
+    const j = await api('/api/admin/overview');
+    if (!j.ok) return;
+    DATA = j;
+    renderRound(j.round);
+    renderPlayers(j.players);
+    renderSettings(j.settings);
+    renderGm(j.accounts);
+    renderHistory(j.history);
+    fillGmTargets(j.players);
+    $('#pcount').textContent = j.players.filter(p => p.alive).length + ' / ' + j.players.length;
+    if (SEL) renderEditor();
+    if (!$('#tab-stats').classList.contains('hidden')) loadStats();
+  } catch (e) { /* ignore */ }
+}
+
+function fmtLeft(r) {
+  if (r.state !== 'running') return '--:--';
+  const end = r.extended ? r.hardEndsAt : r.endsAt;
+  const left = Math.max(0, end - Date.now());
+  const m = Math.floor(left / 60000), s = Math.floor(left % 60000 / 1000);
+  return String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+}
+
+function renderRound(r) {
+  const map = { idle: ['idle','未开始'], running: ['run','进行中'], ended: ['end','已结束'] };
+  const [cls, txt] = map[r.state] || ['idle','—'];
+  $('#roundState').innerHTML = `<span class="dot ${cls}"></span>${txt} #${r.id}`;
+  $('#countdown').textContent = fmtLeft(r);
+  $('#r_id').value = r.id;
+  $('#r_state').value = txt;
+  $('#r_left').value = fmtLeft(r);
+  $('#btnStartRound').disabled = r.state === 'running';
+  $('#btnEndRound').disabled = r.state !== 'running';
+
+  // 空投状态
+  const sn = $('#supplyNow'), sx = $('#supplyNext');
+  if (sn) {
+    if (r.supply) {
+      sn.innerHTML = `<span class="tag alive">空投中</span> 「${esc(r.supply.zoneName)}」 · 还剩 ${Math.ceil(r.supply.leftMs / 60000)} 分钟${r.supply.epic ? ' · 必出史诗' : ''}`;
+    } else {
+      sn.innerHTML = '<span class="tag">无空投</span>';
+    }
+  }
+  if (sx) {
+    sx.textContent = r.state === 'running'
+      ? `下一轮空投 ${Math.max(0, Math.ceil(r.nextSupplyInMs / 60000))} 分钟后`
+      : '';
+  }
+}
+
+// 强化等级小徽标：+1/+2/+3
+function plusBadge(pl) {
+  if (!pl) return '—';
+  const parts = [];
+  if (pl.weapon) parts.push(`武+${pl.weapon}`);
+  if (pl.body) parts.push(`甲+${pl.body}`);
+  if (pl.head) parts.push(`盔+${pl.head}`);
+  return parts.length ? parts.join(' ') : '—';
+}
+
+function renderPlayers(ps) {
+  $('#playerRows').innerHTML = ps.map(p => `
+    <tr data-u="${esc(p.username)}" class="${SEL===p.username?'sel':''}">
+      <td>${esc(p.username)}</td>
+      <td>${esc(p.name)}</td>
+      <td><span class="tag ${p.alive?'alive':'dead'}">${p.alive?'存活':'出局'}</span>${p.invincible?' <span class="tag inv">无敌</span>':''}</td>
+      <td>${p.hp}/${p.hpMax}</td>
+      <td>${p.ep}</td>
+      <td>${p.gold}</td>
+      <td>${esc(p.zoneName)}</td>
+      <td>${p.turn}</td>
+      <td>${p.kills}</td>
+      <td>${p.titles}</td>
+      <td><b style="color:var(--accent)">${p.score == null ? '—' : p.score}</b></td>
+      <td>${plusBadge(p.plus)}</td>
+    </tr>`).join('') || '<tr><td colspan="12" style="color:var(--dim)">还没有玩家</td></tr>';
+
+  document.querySelectorAll('#playerRows tr[data-u]').forEach(tr => {
+    tr.onclick = () => { SEL = tr.dataset.u; renderEditor(); refresh(); };
+  });
+}
+
+function currentPlayer() {
+  return DATA && DATA.players.find(p => p.username === SEL);
+}
+
+function renderEditor() {
+  const p = currentPlayer();
+  if (!p) { $('#editCard').classList.add('hidden'); return; }
+  $('#editCard').classList.remove('hidden');
+  $('#editName').textContent = p.username;
+  $('#f_name').value = p.name;
+  $('#f_hp').value = p.hp;
+  $('#f_ep').value = p.ep;
+  $('#f_gold').value = p.gold;
+  $('#f_pos').value = p.pos;
+  $('#f_alive').value = p.alive ? '1' : '0';
+  $('#f_sta').value = p.attrs.sta;
+  $('#f_str').value = p.attrs.str;
+  $('#f_cha').value = p.attrs.cha;
+  $('#f_int').value = p.attrs.int;
+  $('#f_luk').value = p.attrs.luk;
+  $('#f_inv').checked = !!p.invincible;
+  $('#bagInfo').textContent = `${p.bagUsed} / ${p.bagSlots} 格`;
+  const car = p.career || {}, stt = p.stats || {};
+  const ci = $('#careerInfo');
+  if (ci) {
+    ci.innerHTML = `带七娃回家 <b style="color:var(--accent)">${car.sevenWa || 0}</b> 次（跨轮次）`
+      + ` · 救人质 ${stt.savedHostages || 0} · 唱歌 ${stt.songs || 0}`
+      + ` · 击杀 ${stt.kills || 0} · 合成 ${stt.crafts || 0} · 交易 ${stt.trades || 0}`
+      + ` · 称号 ${p.titles || 0}`
+      + (p.settled ? ' · <span style="color:var(--accent2)">已结算</span>' : '');
+  }
+  renderBag(p.username);
+}
+
+async function renderBag(username) {
+  // 背包详情从导出接口取
+  const j = await api('/api/admin/bagview?u=' + encodeURIComponent(username));
+  if (!j.ok) { $('#bagList').innerHTML = '<div class="hint" style="padding:8px">读取失败</div>'; return; }
+  const rows = (j.bag || []).map(it => `
+    <div class="bagrow">
+      <span class="nm">${esc(it.name)}</span>
+      <span class="qt">x${it.n}</span>
+      <button data-rm="${it.id}">−1</button>
+      <button data-rmall="${it.id}">全删</button>
+    </div>`).join('');
+  $('#bagList').innerHTML = rows || '<div class="hint" style="padding:8px">背包是空的</div>';
+  document.querySelectorAll('[data-rm]').forEach(b => b.onclick = async e => {
+    e.stopPropagation();
+    await api('/api/admin/bag', { username, action: 'remove', itemId: b.dataset.rm, n: 1 });
+    refresh();
+  });
+  document.querySelectorAll('[data-rmall]').forEach(b => b.onclick = async e => {
+    e.stopPropagation();
+    const cur = j.bag.find(x => x.id === b.dataset.rmall);
+    await api('/api/admin/bag', { username, action: 'remove', itemId: b.dataset.rmall, n: cur ? cur.n : 99 });
+    refresh();
+  });
+}
+
+$('#btnSavePlayer').onclick = async () => {
+  if (!SEL) return;
+  const body = {
+    username: SEL,
+    name: $('#f_name').value,
+    hp: +$('#f_hp').value,
+    ep: +$('#f_ep').value,
+    gold: +$('#f_gold').value,
+    pos: $('#f_pos').value,
+    alive: $('#f_alive').value === '1',
+    invincible: $('#f_inv').checked,
+    resetScene: $('#f_reset').checked,
+    attrs: {
+      sta: +$('#f_sta').value, str: +$('#f_str').value, cha: +$('#f_cha').value,
+      int: +$('#f_int').value, luk: +$('#f_luk').value,
+    },
+  };
+  const j = await api('/api/admin/player', body);
+  if (j.ok) { toast('已保存'); refresh(); } else toast(j.msg || '失败');
+};
+
+$('#btnAddItem').onclick = async () => {
+  if (!SEL) return;
+  const j = await api('/api/admin/bag', {
+    username: SEL, action: 'add',
+    itemId: $('#addItemSel').value, n: +$('#addItemN').value || 1,
+  });
+  if (j.ok) { toast('已添加'); refresh(); } else toast(j.msg || '失败');
+};
+
+$('#btnClearBag').onclick = async () => {
+  if (!SEL) return;
+  if (!confirm('确定清空 ' + SEL + ' 的背包？')) return;
+  await api('/api/admin/bag', { username: SEL, action: 'clear' });
+  refresh();
+};
+
+function renderSettings(s) {
+  if (document.activeElement && document.activeElement.closest('#tab-settings')) return;
+  $('#s_loot').value = s.lootRate;
+  $('#s_gold').value = s.goldRate;
+  $('#s_shop').value = s.shopMul != null ? s.shopMul : 1;
+  $('#s_startGold').value = s.startGold != null ? s.startGold : 100;
+  $('#s_move').value = s.moveCost != null ? s.moveCost : 4;
+  $('#s_explore').value = s.exploreCost != null ? s.exploreCost : 3;
+  $('#s_statusSec').value = Math.round((s.statusMs || 300000) / 1000);
+  $('#s_seven').value = s.sevenWaChance != null ? s.sevenWaChance : 20;
+  $('#s_enc').value = s.encounterMul != null ? s.encounterMul : 1;
+  $('#s_mine').value = s.mineMul != null ? s.mineMul : 1;
+  $('#s_bossHp').value = s.bossHp;
+  $('#s_bossAtk').value = s.bossAtk;
+  $('#s_auto').checked = !!s.autoStart;
+  $('#s_bossOn').checked = s.bossEnabled !== false;
+}
+
+$('#btnSaveSettings').onclick = async () => {
+  const j = await api('/api/admin/settings', {
+    lootRate: +$('#s_loot').value,
+    goldRate: +$('#s_gold').value,
+    shopMul: +$('#s_shop').value,
+    startGold: +$('#s_startGold').value,
+    moveCost: +$('#s_move').value,
+    exploreCost: +$('#s_explore').value,
+    statusMs: (+$('#s_statusSec').value) * 1000,
+    sevenWaChance: +$('#s_seven').value,
+    encounterMul: +$('#s_enc').value,
+    mineMul: +$('#s_mine').value,
+    bossHp: +$('#s_bossHp').value,
+    bossAtk: +$('#s_bossAtk').value,
+    autoStart: $('#s_auto').checked,
+    bossEnabled: $('#s_bossOn').checked,
+  });
+  if (j.ok) { toast('数值已更新'); refresh(); } else toast(j.msg || '失败');
+};
+
+$('#btnChangePwd').onclick = async () => {
+  const np = $('#newPwd').value;
+  if (np.length < 8) { toast('新密码至少 8 位'); return; }
+  if (!confirm('改完密码后所有后台会话会失效，需要重新登录。确定？')) return;
+  const j = await api('/api/admin/password', { password: np });
+  if (j.ok) {
+    toast('密码已修改，请重新登录');
+    $('#newPwd').value = '';
+    setTimeout(logout, 800);
+  } else {
+    toast(j.msg || '失败');
+  }
+};
+
+function renderGm(accounts) {
+  $('#gmRows').innerHTML = accounts.map(a => `
+    <tr>
+      <td>${esc(a.username)} ${a.isGM?'<span class="tag gm">GM</span>':''}</td>
+      <td>${a.isGM?'是':'否'}</td>
+      <td>${new Date(a.created).toLocaleDateString()}</td>
+      <td><button data-gm="${esc(a.username)}" data-on="${a.isGM?0:1}">${a.isGM?'取消 GM':'设为 GM'}</button></td>
+    </tr>`).join('') || '<tr><td colspan="4" class="hint">还没有账号</td></tr>';
+
+  document.querySelectorAll('[data-gm]').forEach(b => b.onclick = async () => {
+    const j = await api('/api/admin/gm', { username: b.dataset.gm, isGM: b.dataset.on === '1' });
+    toast(j.ok ? '已更新' : '失败');
+    refresh();
+  });
+}
+
+function renderHistory(h) {
+  const REASON = { boss: 'BOSS 被击杀', sevenwa: '带走七娃', wiped: '全员出局', timeout: '时间到', manual: '管理员结束' };
+  $('#historyRows').innerHTML = (h || []).map(x => `
+    <tr><td>#${x.roundId}</td><td>${esc(REASON[x.reason] || x.reason || '—')}</td><td>${esc(x.winner || '—')}</td>
+    <td>${(x.top||[]).slice(0,3).map(t=>esc(t.name)+'('+t.kills+'杀'+(t.score!=null?' '+t.score+'分':'')+')').join('、') || '—'}</td></tr>
+  `).join('') || '<tr><td colspan="4" class="hint">还没有结束过任何一轮</td></tr>';
+}
+
+// ---------- 运行状况 ----------
+async function loadStats() {
+  try {
+    const j = await api('/api/admin/stats');
+    if (!j.ok) return;
+    const fmtBytes = b => b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.round(b / 1024) + ' KB';
+    const fmtUp = s => {
+      const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60);
+      return h > 0 ? `${h}h ${m}m` : `${m}m ${s % 60}s`;
+    };
+    const boxes = [
+      ['账号总数', j.accounts], ['角色总数', j.chars],
+      ['本轮人数', j.roundChars], ['存活', j.alive], ['出局', j.dead],
+      ['本轮击杀', j.totalKills], ['本轮金币', '¥' + j.totalGold],
+      ['七娃回家', (j.sevenWaTotal || 0) + ' 次'],
+      ['聊天消息', j.chatCount], ['存档大小', fmtBytes(j.saveBytes)],
+      ['内存占用', j.memMB + ' MB'], ['运行时长', fmtUp(j.uptime)], ['Node', j.node],
+    ];
+    if (j.storage) {
+      boxes.push(
+        ['内存存档', j.storage.saves + ' 份'],
+        ['待落盘', j.storage.dirty + ' 份'],
+        ['存储模式', j.storage.ready ? '内存优先' : '直读磁盘'],
+        ['回收站', j.storage.trashBusy ? '后台清空中…' : (j.storage.trash + ' 项')],
+      );
+    }
+    // 前端资源版本号：内容哈希，改完文件这里就变，浏览器据此拿新版
+    if (j.assets) {
+      boxes.push(['前端版本', ['app.js', 'style.css', 'pixel.js']
+        .filter(k => j.assets[k]).map(k => k + ' ' + j.assets[k]).join(' · ')]);
+    }
+    // 物品/配方规模：确认改过的数据真的生效了
+    const cat = j.catalog;
+    if (cat) {
+      boxes.push(
+        ['物品总数', cat.items], ['武器', cat.weapons], ['防具', cat.armors],
+        ['对敌道具', cat.hostile], ['配方数', cat.recipes],
+        ['射击模式', cat.fireModes + ' 种'], ['史诗装备', cat.epicGear + ' 件'],
+        ['强化上限', '+' + cat.maxPlus],
+      );
+    }
+    $('#statGrid').innerHTML = boxes.map(([k, v]) =>
+      `<div class="statbox"><span>${k}</span><b>${esc(String(v))}</b></div>`).join('');
+
+    const heat = j.zoneHeat || [];
+    const max = Math.max(1, ...heat.map(h => h.n));
+    $('#zoneHeat').innerHTML = heat.length ? heat.map(h =>
+      `<div class="heatrow"><span class="hn">${esc(h.name)}</span>
+        <div class="hbar"><div style="width:${h.n / max * 100}%"></div></div>
+        <span class="hc">${h.n}</span></div>`).join('')
+      : '<div class="hint">本轮还没有玩家。</div>';
+  } catch (e) { /* ignore */ }
+}
+
+async function loadChat() {
+  try {
+    const j = await api('/api/admin/chat');
+    if (!j.ok) return;
+    const rows = (j.msgs || []).map(m => {
+      const time = new Date(m.at).toLocaleTimeString('zh-CN', { hour12: false });
+      const ch = { public: '公共', zone: '区块', private: '私聊' }[m.ch] || m.ch;
+      const to = m.to ? ' → ' + m.to : '';
+      return `<div class="chatrow"><span class="ct">${time}</span><span class="cc">${ch}</span>
+        <span class="cf">${esc(m.from)}${esc(to)}</span><span class="cm">${esc(m.text)}</span></div>`;
+    }).join('');
+    $('#chatLog').innerHTML = rows || '<div class="hint" style="padding:10px">还没有聊天记录。</div>';
+  } catch (e) { /* ignore */ }
+}
+
+function fillGmTargets(players) {
+  const sel = $('#gmTarget');
+  if (!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = (players || []).map(p =>
+    `<option value="${esc(p.username)}">${esc(p.name)} (@${esc(p.username)})</option>`).join('')
+    || '<option value="">（没有角色）</option>';
+  if (cur) sel.value = cur;
+}
+
+$('#btnGmRun').onclick = async () => {
+  const u = $('#gmTarget').value;
+  const cmd = $('#gmCmd').value.trim();
+  if (!u || !cmd) { toast('选一个玩家并输入命令'); return; }
+  const j = await api('/api/admin/gmcmd', { username: u, cmd });
+  $('#gmResult').textContent = (j.ok ? '✓ ' : '✗ ') + (j.msg || '');
+  toast(j.ok ? '已执行' : (j.msg || '失败'));
+  refresh();
+};
+
+document.querySelectorAll('[data-quick]').forEach(b => {
+  b.onclick = () => { $('#gmCmd').value = b.dataset.quick; };
+});
+
+// ---------- 批量操作 ----------
+async function globalOp(body, confirmMsg) {
+  if (confirmMsg && !confirm(confirmMsg)) return;
+  const j = await api('/api/admin/global', body);
+  toast(j.ok ? `已影响 ${j.affected} 个角色` : (j.msg || '失败'));
+  refresh();
+}
+
+$('#btnHealAll').onclick = () => globalOp({ action: 'heal' }, '给本轮所有角色满血复活？');
+$('#btnGoldAll').onclick = () => globalOp({ action: 'gold', amount: +$('#gGold').value }, `给每个角色发 ${$('#gGold').value} 金币？`);
+$('#btnItemAll').onclick = () => globalOp({ action: 'item', itemId: $('#gItem').value, n: +$('#gItemN').value }, '给每个角色发这个物品？');
+$('#btnInvAll').onclick = () => globalOp({ action: 'invincible', on: true }, '给本轮所有角色开无敌？');
+$('#btnInvOff').onclick = () => globalOp({ action: 'invincible', on: false }, '关闭所有人的无敌？');
+$('#btnResetAll').onclick = () => globalOp({ action: 'reset' }, '⚠️ 会删除本轮所有角色的存档，不可恢复。确定？');
+
+$('#btnClearChat').onclick = async () => {
+  if (!confirm('清空所有聊天记录？')) return;
+  await api('/api/admin/chat/clear', {});
+  loadChat();
+  toast('已清空');
+};
+
+$('#btnExportCsv').onclick = async () => {
+  try {
+    const r = await fetch('/api/admin/export/csv', {
+      headers: { Authorization: 'Bearer ' + TOKEN },
+    });
+    if (!r.ok) { toast('导出失败'); return; }
+    const blob = await r.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'br-all-' + Date.now() + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1200);
+    toast('已导出');
+  } catch (e) { toast('导出失败'); }
+};
+
+$('#btnStartRound').onclick = async () => {
+  if (!confirm('开始新一轮？当前所有玩家需要重新开局。')) return;
+  const j = await api('/api/admin/round', { action: 'start' });
+  toast(j.ok ? '已开始' : (j.msg || '失败'));
+  refresh();
+};
+
+$('#btnEndRound').onclick = async () => {
+  if (!confirm('提前结束本轮？')) return;
+  const j = await api('/api/admin/round', { action: 'end' });
+  toast(j.ok ? '已结束' : '失败');
+  refresh();
+};
+
+$('#btnSupply').onclick = async () => {
+  const zone = $('#supplyZone').value;
+  const where = zone ? (ZONES.find(z => z.id === zone) || {}).name || zone : '随机区块';
+  if (!confirm(`立刻在「${where}」空投一个补给箱？（公屏会连发三遍）`)) return;
+  const j = await api('/api/admin/round', { action: 'supply', zone });
+  toast(j.ok ? `空投已投放到 ${j.zone}` : (j.msg || '失败'));
+  refresh();
+};
+
+$('#btnBroadcast').onclick = async () => {
+  const t = $('#bcText').value.trim();
+  if (!t) return;
+  const j = await api('/api/admin/broadcast', { text: t });
+  toast(j.ok ? '已广播' : '失败');
+  if (j.ok) $('#bcText').value = '';
+};
+
+let toastT = null;
+function toast(msg) {
+  document.querySelectorAll('.toast').forEach(e => e.remove());
+  const d = document.createElement('div');
+  d.className = 'toast';
+  d.textContent = msg;
+  d.style.cssText = 'position:fixed;left:50%;bottom:30px;transform:translateX(-50%);background:#0a0c07;border:2px solid #d4a340;color:#d4a340;padding:8px 18px;z-index:999;font-size: clamp(15px, 1.068vw, 21px)';
+  document.body.appendChild(d);
+  clearTimeout(toastT);
+  toastT = setTimeout(() => d.remove(), 2000);
+}
+
+setInterval(() => {
+  if (DATA && DATA.round && DATA.round.state === 'running') {
+    $('#countdown').textContent = fmtLeft(DATA.round);
+    $('#r_left').value = fmtLeft(DATA.round);
+  }
+}, 1000);
+
+(async function init() {
+  if (TOKEN) {
+    try { await boot(); return; } catch (e) {}
+  }
+  $('#login').classList.remove('hidden');
+})();
+</script>
+</body>
+</html>
