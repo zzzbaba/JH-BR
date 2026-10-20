@@ -6,12 +6,19 @@
 """
 import json
 import os
+import tempfile
+import time
 import urllib.request
 
 REPO = os.environ["REPO"]
 TOKEN = os.environ["GH_TOKEN"]
 RUN_URL = os.environ.get("RUN_URL", "")
 TITLE = "每日自检失败"
+LABEL = "ci-failure"
+
+# 不硬编码 /tmp：Git Bash 的 /tmp 和 Windows Python 的 /tmp 不是同一个目录。
+# 用 tempfile 拿到的才是两边一致的那个（CI 的 Linux 上就是 /tmp）。
+TMP = tempfile.gettempdir()
 
 
 def api(path, data=None, method=None):
@@ -31,14 +38,14 @@ def api(path, data=None, method=None):
 
 def read_failed():
     try:
-        with open("/tmp/failed.txt", encoding="utf-8") as f:
+        with open(os.path.join(TMP, "failed.txt"), encoding="utf-8") as f:
             return [line.strip() for line in f if line.strip()]
     except FileNotFoundError:
         return []
 
 
 def tail_log(name, n=25):
-    path = f"/tmp/{name}.log"
+    path = os.path.join(TMP, f"{name}.log")
     if not os.path.exists(path):
         return None
     with open(path, encoding="utf-8", errors="replace") as f:
@@ -67,20 +74,38 @@ def build_body():
     return "\n".join(parts)
 
 
+def find_open_issue():
+    """找同名的 open issue。
+
+    GitHub 的 issue 列表有短暂延迟，刚创建的那条可能查不到。
+    列表为空时多等几轮；列表非空但没有同名，就认为确实没有。
+    """
+    for _ in range(4):
+        issues = api(f"/issues?state=open&labels={LABEL}&per_page=100")
+        hit = next(
+            (i for i in issues if i.get("title") == TITLE and "pull_request" not in i),
+            None,
+        )
+        if hit:
+            return hit
+        if issues:
+            return None
+        time.sleep(3)
+    return None
+
+
 def main():
     body = build_body()
-
-    issues = api("/issues?state=open&per_page=100")
-    exist = next(
-        (i for i in issues if i.get("title") == TITLE and "pull_request" not in i),
-        None,
-    )
+    exist = find_open_issue()
 
     if exist:
         api(f"/issues/{exist['number']}/comments", {"body": body})
         print(f"已有 issue #{exist['number']}，已追加评论")
     else:
-        created = api("/issues", {"title": TITLE, "body": body})
+        created = api(
+            "/issues",
+            {"title": TITLE, "body": body, "labels": [LABEL]},
+        )
         print(f"新建 issue #{created['number']}")
 
 
