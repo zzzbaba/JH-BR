@@ -1,13 +1,19 @@
 name: 定时切换仓库可见性
 
-# 北京时间 23:00 → 公开（UTC 15:00）
-# 北京时间 06:00 → 私有（UTC 22:00，前一天）
-# 注意：GitHub 的 cron 一律按 UTC 走，别写成北京时间。
+# 北京时间 23:05 → 公开（UTC 15:05）
+# 北京时间 06:05 → 私有（UTC 22:05，前一天）
+#
+# 为什么不写整点：GitHub 官方文档明确说整点是高负载时段，
+# 排队中的 scheduled 任务「可能被丢弃」。2026-10-20 实测：
+# 设在 0 15 / 0 22 的两次调度一次都没跑，全是静默丢失。
+# 所以避开整点，并且每个动作各留一个冗余时间（幂等，跑两次无害）。
 
 on:
   schedule:
-    - cron: '0 15 * * *'
-    - cron: '0 22 * * *'
+    - cron: '5 15 * * *'     # 北京 23:05 公开
+    - cron: '20 15 * * *'    # 北京 23:20 公开（冗余，防前一次被丢）
+    - cron: '5 22 * * *'     # 北京 06:05 私有
+    - cron: '20 22 * * *'    # 北京 06:20 私有（冗余）
   workflow_dispatch:
     inputs:
       visibility:
@@ -35,13 +41,15 @@ jobs:
       - name: 判断目标可见性
         id: target
         run: |
+          SCHED="${{ github.event.schedule }}"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             VIS="${{ github.event.inputs.visibility }}"
-          elif [ "${{ github.event.schedule }}" = "0 15 * * *" ]; then
+          elif [ "$SCHED" = "5 15 * * *" ] || [ "$SCHED" = "20 15 * * *" ]; then
             VIS="public"
           else
             VIS="private"
           fi
+          echo "触发方式：${{ github.event_name }}（cron: $SCHED）"
           echo "目标：$VIS"
           echo "vis=$VIS" >> "$GITHUB_OUTPUT"
 
