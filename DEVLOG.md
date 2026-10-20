@@ -1867,7 +1867,7 @@ public/admin.html 961    后台
 
 ```bash
 node test.js        # 数据完整性（142 物品 / 90 配方引用）+ 20 局平衡模拟
-node test2.js       # 人质 / 生育 / 成就 / BOSS / 无敌 / 金币
+node test2.js       # 人质 / 挑逗唱歌 / 成就 / BOSS / 无敌 / 金币
 node test3.js       # 状态 / 七娃 / 刘颖
 node test4.js       # 耐久/改装/NPC/精力/换物/批量吃药/强化/射击模式/对敌道具/勾选丢弃/智力门槛/时长
 node api-test2.js   # 轮次 / 商店 / 聊天 / GM / 交易 / 后台
