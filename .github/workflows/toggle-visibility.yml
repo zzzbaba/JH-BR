@@ -1,19 +1,18 @@
-name: 定时切换仓库可见性
+name: 仓库可见性自愈
 
-# 北京时间 23:05 → 公开（UTC 15:05）
-# 北京时间 06:05 → 私有（UTC 22:05，前一天）
+# 每小时第 5 分钟醒一次：算出「现在北京时间该是公开还是私有」，
+# 和当前状态对不上才动手。已经是目标状态就直接退出，不浪费调用。
 #
-# 为什么不写整点：GitHub 官方文档明确说整点是高负载时段，
-# 排队中的 scheduled 任务「可能被丢弃」。2026-10-20 实测：
-# 设在 0 15 / 0 22 的两次调度一次都没跑，全是静默丢失。
-# 所以避开整点，并且每个动作各留一个冗余时间（幂等，跑两次无害）。
+# 公开窗口：北京时间 23:00 ~ 05:59
+#
+# 为什么不用「定点切换」：GitHub 的 schedule 不保证执行。
+# 官方文档说整点属高负载时段，排队中的任务可能被直接丢弃。
+# 2026-10-20 实测：设在 0 15 / 0 22 的两次调度一次都没跑，且不报错。
+# 声明式自愈的好处是丢一次不影响，下一小时自动纠正。
 
 on:
   schedule:
-    - cron: '5 15 * * *'     # 北京 23:05 公开
-    - cron: '20 15 * * *'    # 北京 23:20 公开（冗余，防前一次被丢）
-    - cron: '5 22 * * *'     # 北京 06:05 私有
-    - cron: '20 22 * * *'    # 北京 06:20 私有（冗余）
+    - cron: '5 * * * *'
   workflow_dispatch:
     inputs:
       visibility:
@@ -33,42 +32,60 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  toggle:
+  sync:
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
     steps:
-      - name: 判断目标可见性
-        id: target
+      - name: 算出目标状态
+        id: want
         run: |
-          SCHED="${{ github.event.schedule }}"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VIS="${{ github.event.inputs.visibility }}"
-          elif [ "$SCHED" = "5 15 * * *" ] || [ "$SCHED" = "20 15 * * *" ]; then
-            VIS="public"
+            WANT="${{ github.event.inputs.visibility }}"
+            echo "手动触发 → 目标：$WANT"
           else
-            VIS="private"
+            H=$(TZ='Asia/Shanghai' date +%H)
+            H=$((10#$H))
+            if [ "$H" -ge 23 ] || [ "$H" -lt 6 ]; then
+              WANT=public
+            else
+              WANT=private
+            fi
+            echo "北京时间 ${H} 点 → 目标：$WANT"
           fi
-          echo "触发方式：${{ github.event_name }}（cron: $SCHED）"
-          echo "目标：$VIS"
-          echo "vis=$VIS" >> "$GITHUB_OUTPUT"
+          echo "want=$WANT" >> "$GITHUB_OUTPUT"
 
-      - name: 检查 Secret 是否存在
+      - name: 读当前状态
+        id: cur
         env:
           PAT: ${{ secrets.REPO_PAT }}
-        run: |
-          if [ -z "$PAT" ]; then
-            echo "::error::缺少 REPO_PAT。去 Settings → Secrets and variables → Actions 添加，值是一个带 repo 权限的 PAT。"
-            exit 1
-          fi
-
-      - name: 调用 API 切换
-        env:
-          PAT: ${{ secrets.REPO_PAT }}
-          VIS: ${{ steps.target.outputs.vis }}
           REPO: ${{ github.repository }}
         run: |
-          if [ "$VIS" = "public" ]; then
+          if [ -z "$PAT" ]; then
+            echo "::error::缺少 REPO_PAT，去 Settings → Secrets and variables → Actions 添加"
+            exit 1
+          fi
+          BODY=$(curl -sf --retry 3 \
+            -H "Authorization: Bearer $PAT" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$REPO")
+          CUR=$(printf '%s' "$BODY" | python3 -c "import json,sys;print('private' if json.load(sys.stdin).get('private') else 'public')")
+          echo "当前：$CUR"
+          echo "cur=$CUR" >> "$GITHUB_OUTPUT"
+
+      - name: 需要时切换
+        env:
+          PAT: ${{ secrets.REPO_PAT }}
+          REPO: ${{ github.repository }}
+          WANT: ${{ steps.want.outputs.want }}
+          CUR: ${{ steps.cur.outputs.cur }}
+        run: |
+          if [ "$CUR" = "$WANT" ]; then
+            echo "已经是 $WANT，跳过"
+            exit 0
+          fi
+
+          if [ "$WANT" = "public" ]; then
             FLAG=false
           else
             FLAG=true
@@ -89,5 +106,4 @@ jobs:
             cat /tmp/resp.json
             exit 1
           fi
-
-          python3 -c "import json;d=json.load(open('/tmp/resp.json'));print('仓库:',d.get('full_name'));print('当前可见性:',d.get('visibility'));print('private:',d.get('private'))"
+          python3 -c "import json;d=json.load(open('/tmp/resp.json'));print('已切换为',d.get('visibility'))"
