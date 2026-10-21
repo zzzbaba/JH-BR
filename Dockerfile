@@ -11,14 +11,16 @@ ENV NODE_ENV=production \
     HOST=0.0.0.0
 
 # 只拷运行必需的文件（测试脚本、截图脚本、文档都不进镜像）
-COPY server.js world.js game.js trade.js ./
+COPY server.js world.js game.js trade.js storage-queue.js ./
 COPY data ./data
 COPY public ./public
 
-# 数据目录。真正持久化靠 volume 挂载，这里保证目录存在且 node 用户可写
 RUN mkdir -p /app/store/saves /app/store/_trash \
  && chown -R node:node /app
 
+# 非 root 运行。
+# 挂载进来的 ./store 由 deploy.sh 在宿主机侧 chmod 777 保证可写，
+# 不在容器里做任何 chown —— 入口脚本、su-exec 那套在 macOS 上变量太多。
 USER node
 
 EXPOSE 8123

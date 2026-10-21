@@ -145,11 +145,15 @@
       </div>
       <div class="zone-bar">
         <div class="zone-head">
-          <span id="zRegion" class="region-tag">十号地</span>
-          <span id="zName" class="zone-name">十号地</span>
-          <span id="zShop" class="shop-tag hidden">商人</span>
-          <span id="zSupply" class="supply-tag hidden">空投</span>
-          <span id="zDanger" class="danger">危险 1</span>
+          <div class="zh-left">
+            <span id="zRegion" class="region-tag">十号地</span>
+            <span id="zName" class="zone-name">十号地</span>
+          </div>
+          <div class="zh-tags">
+            <span id="zShop" class="shop-tag hidden">商人</span>
+            <span id="zSupply" class="supply-tag hidden">空投</span>
+            <span id="zMarket" class="market-tag hidden">黑市</span>
+          </div>
         </div>
         <div id="zDesc" class="zone-desc"></div>
         <div class="zone-actions">
@@ -157,32 +161,42 @@
           <button id="btnRest" class="btn">原地休息 <em>+精力 / 有风险</em></button>
           <button id="btnShop" class="btn hidden">商店</button>
           <button id="btnNpc" class="btn hidden">交谈</button>
+          <button id="btnMarket" class="btn market-btn hidden">黑市</button>
+          <button id="btnMerc" class="btn merc-btn hidden">佣兵</button>
         </div>
       </div>
     </section>
 
     <!-- ========== 右栏：交互 ========== -->
     <aside class="col-right">
-      <div class="card grow">
+      <!-- 排名 / 公屏：两块合成一张卡，按钮切换 -->
+      <div class="card side-panel" id="panelTop">
         <div class="card-title tabbed">
-          <button class="ctab active" data-ctab="log">记录</button>
-          <button class="ctab" data-ctab="chat">聊天</button>
-          <button class="ctab" data-ctab="rank">排行</button>
+          <button class="stab active" data-stab="sys">公屏</button>
+          <button class="stab" data-stab="rank">排名</button>
+          <em id="rankSub" class="side-sub">—</em>
         </div>
-        <div id="paneLog" class="pane"><div id="logList" class="log-list"></div></div>
-        <div id="paneChat" class="pane hidden">
-          <div class="chat-tabs">
-            <button class="chtab active" data-ch="public">公共</button>
-            <button class="chtab" data-ch="zone">区块</button>
-            <button class="chtab" data-ch="private">私聊</button>
-          </div>
-          <div id="chatList" class="chat-list"></div>
-          <div class="chat-input">
-            <input id="chatText" type="text" maxlength="200" placeholder="说点什么…（@玩家ID 私聊）">
-            <button id="btnSend" class="btn tiny">发送</button>
-          </div>
-        </div>
+        <div id="paneSys" class="pane"><div id="sysList" class="log-list"></div></div>
         <div id="paneRank" class="pane hidden"><div id="rankList" class="rank-list"></div></div>
+      </div>
+
+      <!-- 信息 / 区块 / 私聊：个人日志 + 聊天合成一张卡 -->
+      <div class="card side-panel grow" id="panelInfo">
+        <div class="card-title tabbed">
+          <button class="ctab active" data-ch="info"
+            data-hint="信息：你自己的行动记录（拾取、战斗、称号），加上公共频道的消息。全服都能看见你说的话。">信息</button>
+          <button class="ctab" data-ch="zone"
+            data-hint="区块：只有和你站在同一个区块的玩家能看见。适合喊附近的人，远处的人听不到。">区块</button>
+          <button class="ctab" data-ch="private"
+            data-hint="私聊：只有你和对方能看见。输入时用 @玩家ID 开头，例如 @a111 借把枪。">私聊</button>
+        </div>
+        <div class="info-pane">
+          <div id="chatList" class="chat-list"></div>
+        </div>
+        <div class="chat-input">
+          <input id="chatText" type="text" maxlength="200" placeholder="说点什么…（@玩家ID 私聊）">
+          <button id="btnSend" class="btn tiny">发送</button>
+        </div>
       </div>
 
       <div class="bottom-btns">

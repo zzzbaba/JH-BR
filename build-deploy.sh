@@ -16,7 +16,7 @@ done
 rm -rf _pkg
 mkdir -p "$STAGE/data" "$STAGE/public" "$STAGE/store/saves" "$STAGE/store/_trash"
 
-cp server.js world.js game.js trade.js "$STAGE"/
+cp server.js world.js game.js trade.js storage-queue.js "$STAGE"/
 cp data/*.js "$STAGE"/data/
 cp public/* "$STAGE"/public/
 cp Dockerfile docker-compose.yml deploy.sh smoke-test.sh README-DEPLOY.md .dockerignore "$STAGE"/

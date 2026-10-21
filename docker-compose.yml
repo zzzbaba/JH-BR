@@ -21,9 +21,12 @@ services:
       HOST: "0.0.0.0"
 
     volumes:
-      # 存档 / 账号 / 世界状态全在这里，务必挂出来
-      # 想把 Windows 上的老数据带过去，直接覆盖这个目录即可
-      - ./store:/app/store
+      # ⚠️ 必须用 docker 卷，不能用 ./store 这种 bind mount。
+      # 原因：storage-queue.js 落盘时会 fsync（handle.sync()），
+      # fsync 在 virtiofs（macOS 的 bind mount）上会挂死 —— 进程卡进 D 状态，
+      # 连 SIGKILL 都杀不掉，容器「Up 但没响应」，还拖垮整个 Docker 引擎（实测 420% CPU）。
+      # 卷在 VM 内的 ext4 上，fsync 正常。实测同样配置跑 11 小时无异常。
+      - brstore:/app/store
 
     # init 负责转发信号 + 回收僵尸进程，让 SIGTERM 能真正到达 node
     init: true
@@ -45,3 +48,8 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  # 固定名字，方便备份/迁移时直接引用；不存在会自动创建
+  brstore:
+    name: jianghan-br-store

@@ -1,5 +1,6 @@
 // 江汉BR —— 世界状态：轮次、聊天、全局设置
 const fs = require('fs');
+const DISK = require('./storage-queue');
 const path = require('path');
 const WEATHERD = require('./data/weather');
 const MAPD = require('./data/map');
@@ -10,6 +11,7 @@ const WORLD_FILE = path.join(STORE, 'world.json');
 const ROUND_MS = 45 * 60 * 1000;   // 标准时长 45 分钟
 const HARD_MS = 60 * 60 * 1000;    // 45 分钟到了还有人活着，延长到 60 分钟
 const CHAT_MAX = 400;
+const RESTART_MS = 10 * 60 * 1000;
 
 let W = null;
 let endHandler = null;
@@ -27,18 +29,22 @@ function defaults() {
       extended: false,
       winner: null,             // { username, name, reason }
       endReason: null,          // boss | sevenwa | wiped | timeout | manual
+      endedAt: null,
+      nextStartAt: null,
       bossKilled: false,
       bossSpawned: false,       // 30 分钟后 BOSS 才登场
     },
     weather: { type: 'clear', until: 0 },
     supply: null,               // { zone, until } 空投补给箱
     nextSupplyAt: 0,
+    market: null,               // { zone, until } 黑市：随机区块，限时开摊
+    nextMarketAt: 0,
     settings: {
       lootRate: 1,              // 掉落倍率
       goldRate: 1,              // 金币收益倍率
       bossHp: 420,              // 最终 BOSS 血量
       bossAtk: 34,
-      autoStart: true,          // 玩家主动点开局时是否允许开新轮（后台可关）
+      autoStart: true,          // 结束 10 分钟后自动开下一轮；关闭后只允许管理员开轮
       moveCost: 4,              // 移动精力消耗
       exploreCost: 3,           // 探索精力消耗
       encounterMul: 1,          // 遭遇概率倍率（0.5 = 一半，2 = 翻倍）
@@ -71,26 +77,23 @@ function load() {
     W.weather = Object.assign({ type: 'clear', until: 0 }, W.weather || {});
     W.supply = W.supply || null;
     W.nextSupplyAt = W.nextSupplyAt || 0;
+    W.market = W.market || null;
+    W.nextMarketAt = W.nextMarketAt || 0;
   } catch (e) {
     W = defaults();
   }
-  // 服务重启后，如果上一轮还在跑，按时间重新判定
-  if (W.round.state === 'running') {
-    const now = Date.now();
-    if (now >= W.round.hardEndsAt) {
-      W.round.state = 'ended';
-      W.round.endReason = 'timeout';
-    }
-  }
+  // 运行中的超时由 tick 统一结算；已结束轮次恢复持久化倒计时。
+  reconcileRestart();
   return W;
 }
 
 function save() {
-  try { fs.writeFileSync(WORLD_FILE, JSON.stringify(W, null, 2), 'utf8'); } catch (e) { console.error('world save fail', e.message); }
+  return DISK.enqueue(WORLD_FILE, W);
 }
 
 function ensure() { if (!W) load(); return W; }
 function get() { return ensure(); }
+function market() { ensure(); return W.market; }
 function settings() { return ensure().settings; }
 // 当前在线人数（由 server 每 10 秒刷新一次，用于动态稀释特殊事件）
 function setOnline(n) { ensure().online = Math.max(1, n | 0); }
@@ -139,6 +142,8 @@ function getChat(since, username, zoneId) {
 
 // ---------- 轮次 ----------
 function startRound(by) {
+  ensure();
+  if (W.round.state === 'running') return W.round;
   const now = Date.now();
   W.round = {
     id: W.round.id + 1,
@@ -149,6 +154,8 @@ function startRound(by) {
     extended: false,
     winner: null,
     endReason: null,
+    endedAt: null,
+    nextStartAt: null,
     bossKilled: false,
     bossSpawned: false,
     warned5: false,      // 结束前 5 分钟是否已经预警过
@@ -174,6 +181,8 @@ function endRound(reason, winner) {
   if (W.round.state !== 'running') return W.round;
   W.round.state = 'ended';
   W.round.endReason = reason;
+  W.round.endedAt = Date.now();
+  W.round.nextStartAt = W.settings.autoStart ? W.round.endedAt + RESTART_MS : null;
   W.round.winner = winner || null;
   save();
 
@@ -187,6 +196,7 @@ function endRound(reason, winner) {
 
   sys(`第 ${W.round.id} 轮结束：${label}。`, 'win');
   if (winner) sys(`本轮胜者：${winner.name || winner.username}。`, 'win');
+  sys(W.settings.autoStart ? '下一轮将在 10 分钟后自动开始。' : '自动开轮已关闭，等待管理员开启下一轮。', 'sys');
 
   if (endHandler) { try { endHandler(W.round, reason); } catch (e) { console.error('end handler', e); } }
   return W.round;
@@ -196,7 +206,33 @@ function onEnd(fn) { endHandler = fn; }
 // server 注入：本轮还有几个活人（45 分钟到点时决定延不延长）
 function setAliveCheck(fn) { aliveCheck = fn; }
 
+// 仅在开关变化或旧数据迁移时安排倒计时，刷新和重启不会延长等待。
+function reconcileRestart() {
+  if (W.round.state !== 'ended' || !W.settings.autoStart) {
+    if (W.round.nextStartAt != null) { W.round.nextStartAt = null; save(); }
+    return;
+  }
+  if (!Number.isFinite(W.round.nextStartAt) || W.round.nextStartAt <= 0) {
+    W.round.nextStartAt = Date.now() + RESTART_MS;
+    save();
+  }
+}
+function setAutoStart(enabled) {
+  ensure();
+  const changed = W.settings.autoStart !== enabled;
+  W.settings.autoStart = enabled;
+  reconcileRestart();
+  save();
+  if (changed) sys(enabled ? '自动开轮已开启：本轮结束后等待 10 分钟；若已结束，则从现在开始等待 10 分钟。' : '自动开轮已关闭，待开轮倒计时已取消；当前对局不受影响。', 'sys');
+}
+
 function tick() {
+  ensure();
+  reconcileRestart();
+  if (W.round.state === 'ended') {
+    if (W.settings.autoStart && Date.now() >= W.round.nextStartAt) startRound('系统自动');
+    return;
+  }
   if (W.round.state !== 'running') return;
   const now = Date.now();
 
@@ -224,6 +260,23 @@ function tick() {
     W.supply = null;
     save();
     if (z) sys(`「${z.name}」的补给箱没人动，已经被收走了。`, 'sys');
+  }
+
+  // ===== 黑市：随机区块，限时开摊 =====
+  if (W.market && now >= W.market.until) {
+    const z = MAPD.BY_ID[W.market.zone];
+    W.market = null;
+    W.nextMarketAt = now + 6 * 60000;
+    save();
+    if (z) sys(`「${z.name}」的黑市收摊了。`, 'sys');
+  }
+  if (!W.market && now >= (W.nextMarketAt || 0)) {
+    const zone = MAPD.MAP[Math.floor(Math.random() * MAPD.MAP.length)];
+    W.market = { zone: zone.id, until: now + 8 * 60000 };
+    save();
+    // 连发两遍：公屏滚得快，一条容易被漏掉
+    sys(`【黑市】有人在「${zone.name}」摆了摊，只收现金，只待 8 分钟。`, 'win');
+    sys(`【黑市】重复一遍：「${zone.name}」。高级武器三倍价，还能雇人替你打一场。`, 'win');
   }
 
   // ===== 结束前 5 分钟预警 =====
@@ -264,6 +317,8 @@ function tick() {
   }
 }
 
+function stopTimer() { if (timer) { clearInterval(timer); timer = null; } }
+
 function startTimer() {
   if (timer) clearInterval(timer);
   timer = setInterval(tick, 5000);
@@ -276,10 +331,10 @@ function pushHistory(entry) {
   save();
 }
 
-module.exports = {
+module.exports = { market,
   load, save, get, settings, round,
   pushChat, sys, getChat,
   startRound, endRound, onEnd, setAliveCheck, setLogHook, startTimer, tick, setOnline, online,
-  pushHistory, weatherNow,
-  ROUND_MS, HARD_MS,
+  pushHistory, weatherNow, stopTimer,
+  ROUND_MS, HARD_MS, RESTART_MS, setAutoStart,
 };

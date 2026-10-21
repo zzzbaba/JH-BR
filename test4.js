@@ -384,6 +384,10 @@ console.log('\n=== 天气系统 ===');
 
 console.log('\n=== BOSS 30 分钟后刷新 ===');
 {
+  // 必须先结束当前轮：startRound 在 state==='running' 时会直接返回、不重建 round。
+  // 本用例后半段会把 startedAt 往前推 31 分钟并 tick，bossSpawned 会被置 true 并落盘，
+  // 不重置的话第二次跑就必然失败（测试不幂等）。
+  W.get().round.state = 'ended';
   W.startRound('自动测试');
   ok(W.round().bossSpawned === false, '开局 BOSS 未出现');
 

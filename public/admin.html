@@ -1109,8 +1109,11 @@ async function loadStats() {
     }
     // 前端资源版本号：内容哈希，改完文件这里就变，浏览器据此拿新版
     if (j.assets) {
-      boxes.push(['前端版本', ['app.js', 'style.css', 'pixel.js']
-        .filter(k => j.assets[k]).map(k => k + ' ' + j.assets[k]).join(' · ')]);
+      // 三个哈希写全会把卡片撑成三倍高，破坏网格对齐：这里只留主包短哈希，
+      // 完整版本放 title 里，鼠标悬停能看到
+      const full = ['app.js', 'style.css', 'pixel.js']
+        .filter(k => j.assets[k]).map(k => k + '  ' + j.assets[k]).join('\n');
+      boxes.push(['前端版本', (j.assets['app.js'] || '—').slice(0, 6), full]);
     }
     // 物品/配方规模：确认改过的数据真的生效了
     const cat = j.catalog;
@@ -1122,8 +1125,8 @@ async function loadStats() {
         ['强化上限', '+' + cat.maxPlus],
       );
     }
-    $('#statGrid').innerHTML = boxes.map(([k, v]) =>
-      `<div class="statbox"><span>${k}</span><b>${esc(String(v))}</b></div>`).join('');
+    $('#statGrid').innerHTML = boxes.map(([k, v, tip]) =>
+      `<div class="statbox"${tip ? ` title="${esc(tip)}"` : ''}><span>${k}</span><b>${esc(String(v))}</b></div>`).join('');
 
     const heat = j.zoneHeat || [];
     const max = Math.max(1, ...heat.map(h => h.n));

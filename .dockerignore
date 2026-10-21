@@ -1,6 +1,7 @@
 # 不进镜像的东西
 store/
 shots/
+dev/
 .workbuddy-ai/
 .git/
 .gitignore

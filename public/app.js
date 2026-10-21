@@ -11,11 +11,10 @@ let IS_GM = false;
 let authMode = 'login';
 let bagSel = null;
 let craftCat = '全部';
-let chatCh = 'public';
+let chatCh = 'info';   // info = 个人日志 + 公共频道
 let chatSince = 0;
 let chatMsgs = [];
-let ctab = 'log';
-let rankTimer = null, chatTimer = null, tickTimer = null, waitTimer = null, stateTimer = null;
+let rankTimer = null, pollTimer = null, tickTimer = null, waitTimer = null;
 
 const canvas = $('#map');
 const ctx = canvas.getContext('2d');
@@ -36,6 +35,23 @@ async function api(path, body) {
 
 let toastTimer = null;
 let lastToastMsg = '', lastToastAt = 0;
+// 提示条贴着地图下沿显示。
+// 以前写死 bottom:40px，会压住区域栏的按钮，而且离「事情发生的地方」（地图）太远。
+// 等待/结算界面没有地图，退回底部居中。
+function positionToast(el) {
+  const wrap = document.querySelector('.map-wrap');
+  const r = wrap ? wrap.getBoundingClientRect() : null;
+  if (!r || !r.height) {
+    el.style.top = 'auto';
+    el.style.bottom = '40px';
+    return;
+  }
+  el.style.bottom = 'auto';
+  el.style.left = Math.round(r.left + r.width / 2) + 'px';
+  const h = el.offsetHeight || 44;
+  el.style.top = Math.round(Math.max(8, r.bottom - h - 8)) + 'px';
+}
+
 function toast(msg) {
   const now = Date.now();
   // 同一句话短时间内重复触发就忽略——否则自动战斗这种循环会把提示闪成频闪灯
@@ -46,6 +62,7 @@ function toast(msg) {
   d.className = 'toast';
   d.textContent = msg;
   document.body.appendChild(d);
+  positionToast(d);
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => d.remove(), 2400);
 }
@@ -442,11 +459,10 @@ function logout() {
 
 function clearTimers() {
   if (rankTimer) clearInterval(rankTimer);
-  if (chatTimer) clearInterval(chatTimer);
+  if (pollTimer) clearInterval(pollTimer);
   if (tickTimer) clearInterval(tickTimer);
   if (waitTimer) clearInterval(waitTimer);
-  if (stateTimer) clearInterval(stateTimer);
-  rankTimer = chatTimer = tickTimer = waitTimer = stateTimer = null;
+  rankTimer = pollTimer = tickTimer = waitTimer = null;
 }
 
 $('#btnLogout').onclick = () => { api('/api/logout', {}).catch(() => {}); logout(); };
@@ -521,7 +537,15 @@ function showWait(st) {
     $('#waitTitle').textContent = '本轮结束';
     const reasonTxt = { boss: '最终 BOSS 被击杀', sevenwa: '有人带着七娃离开了油田', wiped: '所有人都出局了', timeout: '时间到', manual: '被管理员结束' }[r.endReason] || '结束';
     $('#waitSub').textContent = `第 ${r.id} 轮 · ${reasonTxt}`;
-    body.innerHTML = '<div class="hint" style="text-align:center">等待管理员开始下一轮。</div>';
+    const rep = (st && st.report) || [];
+    const sum = (st && st.summary) || null;
+    const reportHtml = rep.length ? `
+      <div class="report-box">
+        <div class="report-title">战 报</div>
+        ${rep.map(l => `<p class="report-line">${esc(l)}</p>`).join('')}
+        ${sum ? `<div class="report-sum">${sum.turn} 回合 · ${sum.kills} 杀 · Lv.${sum.level} · ¥${sum.gold}</div>` : ''}
+      </div>` : '';
+    body.innerHTML = reportHtml + '<div class="hint" style="text-align:center;margin-top:14px">等待管理员开始下一轮。</div>';
     addWaitBtn('看排行榜', '', () => openRankModal());
     addWaitBtn('刷新', '', () => location.reload());
   } else {
@@ -589,30 +613,35 @@ function roundOverTo(st) {
 
 // 轮询自己的状态：被别的玩家袭击时，这边不用动也能收到提示；
 // 轮次结束也要靠它把人从游戏界面拉回结算画面
-async function pollState() {
-  if (!S) return;
-  try {
-    const st = await api('/api/state');
-    // 先判「还能不能继续玩」—— 这个不管在哪个场景、有没有开弹窗都要处理
-    if (!st.hasSave) { roundOverTo(st); return; }
-    if (S.scene !== 'map') return;
-    if (!$('#modal').classList.contains('hidden')) return;
-    if (st.state) { S = st.state; ROUND = st.round; render(); }
-  } catch (e) { /* 网络抖动忽略 */ }
-}
 function startTimers() {
   clearTimers();
   endPolled = false;
-  chatPoll();
-  chatTimer = setInterval(chatPoll, 2200);
-  rankTimer = setInterval(() => { if (S && ctab === 'rank') loadRank(); }, 8000);
+  poll();
+  // 合并轮询：2.5 秒一次，其中每两次带一次完整状态（≈5 秒），
+  // 原来是 chatPoll 2.2s + pollState 5s 两个定时器两个请求
+  pollTimer = setInterval(poll, 2500);
+  loadRank();
+  rankTimer = setInterval(() => { if (S) loadRank(); }, 8000);
   tickTimer = setInterval(tickRound, 1000);
-  // 每 5 秒同步一次状态：别人在别的区块打我，我这边要能收到提示
-  stateTimer = setInterval(pollState, 5000);
 }
 
 function tickRound() {
   if (!ROUND || !S) return;
+  // 黑市常驻提示：光靠公屏播报记不住，人走到那儿可能已经收摊了
+  const zMk = $('#zMarket');
+  if (zMk) {
+    const mkLeft = S.market ? S.market.until - Date.now() : 0;
+    if (S.market && mkLeft > 0) {
+      const zn = ((META.map.find(z => z.id === S.market.zone)) || {}).name || '未知';
+      const left = mkLeft;
+      const here = S.char.pos === S.market.zone;
+      zMk.textContent = here ? `黑市 ${fmtTime(left)}` : `黑市 ${zn} ${fmtTime(left)}`;
+      zMk.classList.remove('hidden');
+      zMk.classList.toggle('here', here);
+    } else {
+      zMk.classList.add('hidden');
+    }
+  }
   // 状态倒计时
   const st = S.char.status;
   if (st && st.id !== 'normal' && st.until) {
@@ -803,6 +832,13 @@ function loop(t) {
 function render() {
   if (!S) return;
   const c = S.char;
+  // 黑市：只有站在那个区块里才显示按钮
+  const mkt = S.market;
+  const atMarket = !!(mkt && c.pos === mkt.zone && S.scene === 'map');
+  $('#btnMarket').classList.toggle('hidden', !atMarket);
+  // 佣兵招募点：固定区块，走到就有按钮
+  const atCamp = !!(META.merc && c.pos === META.merc.zone && S.scene === 'map');
+  $('#btnMerc').classList.toggle('hidden', !atCamp);
   $('#tTurn').textContent = c.turn;
   $('#tKills').textContent = c.kills;
   $('#tGold').textContent = '¥' + (c.gold || 0);
@@ -913,7 +949,6 @@ function renderZone() {
   $('#zRegion').textContent = reg.name;
   $('#zRegion').style.background = reg.color;
   $('#zName').textContent = z.name;
-  $('#zDanger').textContent = '危险 ' + z.danger;
   $('#zDesc').textContent = z.desc;
   const busy = S.scene !== 'map';
   $('#btnExplore').disabled = busy;
@@ -939,8 +974,8 @@ function renderZone() {
       sup.classList.remove('hidden');
       sup.classList.toggle('here', !!S.supplyHere);
       sup.textContent = S.supplyHere
-        ? `空投就在这 ${fmtTime(S.supplyLeftMs || 0)}`
-        : `空投 · ${S.supplyZone}`;
+        ? `空投在此 ${fmtTime(S.supplyLeftMs || 0)}`
+        : `空投 ${S.supplyZone}`;
       sup.title = S.supplyHere
         ? '补给箱就在这个区块，点「探索」去翻'
         : `补给箱在「${S.supplyZone}」，${fmtTime(S.supplyLeftMs || 0)} 后收走`;
@@ -1129,6 +1164,7 @@ const LOG_TAG = {
 
 function renderLog() {
   const box = $('#logList');
+  if (!box) return;   // 日志已经并进「信息」窗口，不再单独渲染
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
   box.innerHTML = '';
   for (const l of S.log) {
@@ -1194,6 +1230,38 @@ function drawMap(t) {
       ctx.beginPath();
       ctx.arc(px + CELL - 11, py + 11, 4.5, 0, Math.PI * 2);
       ctx.fillStyle = 'rgba(212,163,64,0.95)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    // 黑市：右上角一枚红点 + 光晕（限时的东西要显眼，玩家常常找不到）
+    if (S && S.market && S.market.zone === z.id) {
+      const cx = px + CELL - 12, cy = py + 23;
+      // 光晕
+      const g = ctx.createRadialGradient(cx, cy, 1, cx, cy, 13);
+      g.addColorStop(0, 'rgba(255,90,90,0.55)');
+      g.addColorStop(1, 'rgba(255,90,90,0)');
+      ctx.beginPath();
+      ctx.arc(cx, cy, 13, 0, Math.PI * 2);
+      ctx.fillStyle = g;
+      ctx.fill();
+      // 本体
+      ctx.beginPath();
+      ctx.arc(cx, cy, 5.5, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(240,64,64,1)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,220,220,0.9)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+
+    // 佣兵招募点：右上角一枚蓝点（常驻）
+    if (META.merc && META.merc.zone === z.id) {
+      ctx.beginPath();
+      ctx.arc(px + CELL - 22, py + 11, 4.5, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(94,166,224,0.95)';
       ctx.fill();
       ctx.strokeStyle = 'rgba(0,0,0,0.55)';
       ctx.lineWidth = 1;
@@ -1313,9 +1381,18 @@ canvas.addEventListener('mousemove', e => {
   const tip = $('#mapTip');
   if (z) {
     tip.classList.remove('hidden');
-    const shop = META.merchants[z.id] ? ' · 有商人' : '';
-    const boss = z.id === META.bossZone ? ' · BOSS' : '';
-    tip.textContent = `${z.name} · 危险${z.danger} · 物资${z.loot}${shop}${boss}`;
+    let html = `${esc(z.name)} · 危险${z.danger} · 物资${z.loot}`;
+    if (META.merchants[z.id]) html += ' · 有商人';
+    if (z.id === META.bossZone) html += ' · BOSS';
+    // 黑市 / 佣兵：地图上只有一个小圆点，鼠标移上来必须说清楚
+    if (S && S.market && S.market.zone === z.id) {
+      const left = Math.max(0, S.market.until - Date.now());
+      html += `<div class="mt-market">★ 黑市在此 · 剩 ${fmtTime(left)} · 高级武器三倍价</div>`;
+    }
+    if (META.merc && META.merc.zone === z.id) {
+      html += `<div class="mt-merc">★ 佣兵招募点 · 200 / 400 / 800</div>`;
+    }
+    tip.innerHTML = html;
     tip.style.left = (e.clientX - r.left + 14) + 'px';
     tip.style.top = (e.clientY - r.top + 14) + 'px';
   } else tip.classList.add('hidden');
@@ -3195,6 +3272,117 @@ function openShop() {
 // ================= 交易 =================
 let tradeSel = { to: null, giveItems: {}, wantItems: {}, giveGold: 0, wantGold: 0 };
 
+// ---------- 佣兵头子 ----------
+$('#btnMerc').onclick = () => {
+  if (!S) return;
+  if (S.scene !== 'map') { toast('先处理眼前的事'); return; }
+  openMerc();
+};
+
+function openMerc() {
+  const M = META.merc;
+  if (!M) return;
+  const gold = S.char.gold || 0;
+  const rows = M.hire.map(h => {
+    const can = gold >= h.price && !S.merc;
+    return `<div class="mk-row">
+      <span class="mk-name">${esc(h.name)}<i class="mk-sub">攻 ${h.atk} / 血 ${h.hp} · 只打一场</i></span>
+      <span class="mk-price ${can ? '' : 'no'}">¥${h.price}</span>
+      <button class="btn tiny" data-hire="${h.tier}" ${can ? '' : 'disabled'}>雇</button>
+    </div>`;
+  }).join('');
+
+  const merc = S.merc
+    ? `<div class="hint" style="color:var(--good);margin-top:8px">身边跟着：${esc(S.merc.name)}（${S.merc.hp}/${S.merc.maxHp}）</div>`
+    : '<div class="hint" style="margin-top:8px">他打一场就走，别指望他一直跟着你。</div>';
+
+  openModal(`${M.name} · ${M.title}`, `
+    <div class="hint" style="margin-bottom:8px">${esc((M.greet || [])[0] || '')}</div>
+    <div class="hint" style="color:var(--warn);margin-bottom:10px">你身上 ¥${gold}</div>
+    ${rows}
+    ${merc}
+  `, [{ label: '离开', fn: closeModal }]);
+
+  document.querySelectorAll('[data-hire]').forEach(b => {
+    b.onclick = async () => {
+      const r = await doAct('hire', { choice: 'hire', tier: +b.dataset.hire });
+      if (r && r.msg) toast(r.msg);
+      if (S && S.scene === 'map') openMerc();
+    };
+  });
+}
+
+// ---------- 悬浮提示 ----------
+(function initHints() {
+  const pop = document.createElement('div');
+  pop.className = 'hint-pop';
+  document.body.appendChild(pop);
+  document.querySelectorAll('[data-hint]').forEach(el => {
+    el.addEventListener('mouseenter', () => {
+      pop.textContent = el.dataset.hint || '';
+      pop.classList.add('show');
+      const r = el.getBoundingClientRect();
+      const w = 250;
+      // 水平：居中于目标，但不许超出视口
+      pop.style.left = Math.round(Math.max(8, Math.min(window.innerWidth - w - 12, r.left + r.width / 2 - w / 2))) + 'px';
+      // 垂直：先放下方；下方放不下就翻到上方，都放不下就贴边
+      pop.style.top = Math.round(r.bottom + 8) + 'px';
+      const ph = pop.offsetHeight || 84;
+      if (r.bottom + 8 + ph > window.innerHeight - 8) {
+        const above = r.top - ph - 8;
+        pop.style.top = Math.round(above >= 8 ? above : Math.max(8, window.innerHeight - ph - 8)) + 'px';
+      }
+    });
+    el.addEventListener('mouseleave', () => pop.classList.remove('show'));
+  });
+})();
+
+// ---------- 黑市 ----------
+$('#btnMarket').onclick = () => {
+  if (!S) return;
+  if (S.scene !== 'map') { toast('先处理眼前的事'); return; }
+  openMarket();
+};
+
+function openMarket() {
+  const mk = S && S.market;
+  if (!mk) { toast('黑市已经收摊了。'); return; }
+  const M = META.market;
+  const zoneName = ((META.map.find(z => z.id === mk.zone)) || {}).name || mk.zone;
+  const left = Math.max(0, mk.until - Date.now());
+  const gold = S.char.gold || 0;
+
+  const goods = M.goods.map(g => {
+    const it = META.items[g.id] || {};
+    const can = gold >= g.price;
+    return `<div class="mk-row">
+      <span class="mk-name">${esc(it.name || g.id)}</span>
+      <span class="mk-price ${can ? '' : 'no'}">¥${g.price}</span>
+      <button class="btn tiny" data-mkbuy="${g.id}" ${can ? '' : 'disabled'}>买</button>
+    </div>`;
+  }).join('');
+
+  const merc = S.merc
+    ? `<div class="hint" style="color:var(--good);margin-top:10px">身边跟着：${esc(S.merc.name)}（${S.merc.hp}/${S.merc.maxHp}）</div>`
+    : '';
+
+  openModal(`${M.name} · ${zoneName}`, `
+    <div class="hint" style="margin-bottom:8px">${esc((M.greet || [])[0] || '')}</div>
+    <div class="hint" style="color:var(--warn);margin-bottom:10px">还剩 ${fmtTime(left)} 收摊 · 全部三倍价 · 你身上 ¥${gold}</div>
+    <div style="font-size:12px;color:var(--accent2);letter-spacing:2px;margin:6px 0">货</div>
+    ${goods}
+    ${merc}
+  `, [{ label: '离开', fn: closeModal }]);
+
+  document.querySelectorAll('[data-mkbuy]').forEach(b => {
+    b.onclick = async () => {
+      const r = await doAct('market', { choice: 'buy', itemId: b.dataset.mkbuy });
+      if (r && r.msg) toast(r.msg);
+      if (S && S.scene === 'map') openMarket();
+    };
+  });
+}
+
 $('#btnTrade').onclick = () => {
   if (!S) return;
   if (S.scene !== 'map') { toast('先处理眼前的事'); return; }
@@ -3425,6 +3613,10 @@ async function loadRank() {
         <span class="kd">${p.kills}杀 · ${p.titles}称号</span>
       </div>`).join('') || '<div class="hint">还没有人进场。</div>';
     $('#rankList').innerHTML = rows;
+    const board = j.board || [];
+    const alive = board.filter(p => p.alive).length;
+    const sub = $('#rankSub');
+    if (sub) sub.textContent = board.length ? `${alive} 人在场` : '无人';
     return j;
   } catch (e) { return null; }
 }
@@ -3465,31 +3657,38 @@ async function openRankModal() {
 }
 
 // ================= 聊天 =================
+// 右栏改成三块常驻（排名/公屏/信息），不再有 tab 切换
+
+// 频道 tab：类名是 .ctab（标题行里的三个按钮）
 document.querySelectorAll('.ctab').forEach(b => {
   b.onclick = () => {
     document.querySelectorAll('.ctab').forEach(x => x.classList.remove('active'));
-    b.classList.add('active');
-    ctab = b.dataset.ctab;
-    ['log', 'chat', 'rank'].forEach(k => $('#pane' + k[0].toUpperCase() + k.slice(1)).classList.add('hidden'));
-    $('#pane' + ctab[0].toUpperCase() + ctab.slice(1)).classList.remove('hidden');
-    if (ctab === 'rank') loadRank();
-    if (ctab === 'chat') renderChat();
-  };
-});
-
-document.querySelectorAll('.chtab').forEach(b => {
-  b.onclick = () => {
-    document.querySelectorAll('.chtab').forEach(x => x.classList.remove('active'));
     b.classList.add('active');
     chatCh = b.dataset.ch;
     renderChat();
   };
 });
 
-async function chatPoll() {
+// 排名 / 公屏：同一张卡里两个面板切换
+document.querySelectorAll('.stab').forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll('.stab').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    const k = b.dataset.stab;
+    $('#paneRank').classList.toggle('hidden', k !== 'rank');
+    $('#paneSys').classList.toggle('hidden', k !== 'sys');
+    if (k === 'rank') loadRank();
+  };
+});
+
+let pollTick = 0;
+// 合并轮询：聊天每次都拉，状态每两次带一次（等价原来的 5 秒）
+async function poll() {
   if (!TOKEN) return;
+  pollTick++;
+  const wantState = !!S && (pollTick % 2 === 1);
   try {
-    const j = await api('/api/chat/poll?since=' + chatSince);
+    const j = await api('/api/poll?since=' + chatSince + (wantState ? '&state=1' : ''));
     if (j.round) {
       ROUND = j.round;
       // 轮次结束：直接切结算画面（胜利画面除外，那个要留给玩家点「结算」）
@@ -3502,28 +3701,71 @@ async function chatPoll() {
       chatMsgs = chatMsgs.concat(j.msgs);
       if (chatMsgs.length > 200) chatMsgs = chatMsgs.slice(-200);
       chatSince = j.maxId;
-      if (ctab === 'chat') renderChat();
+      renderChat();
+      renderSys();
+    }
+    if (wantState) {
+      if (!j.hasSave) { roundOverTo(j); return; }
+      // 不在主界面 / 有弹窗时不要覆盖当前画面
+      if (S.scene !== 'map') return;
+      if (!$('#modal').classList.contains('hidden')) return;
+      if (j.state) { S = j.state; render(); }
     }
   } catch (e) { /* 忽略轮询错误 */ }
 }
 
+// 系统播报（空投/黑市/天气/轮次）单独进「公屏」，不再混在聊天里
+function isSysMsg(m) {
+  return !!m && (m.from === '系统' || m.kind === 'sys' || m.kind === 'win' || m.kind === 'warn');
+}
+
+function renderSys() {
+  const box = $('#sysList');
+  if (!box) return;
+  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  const list = chatMsgs.filter(isSysMsg).slice(-60);
+  box.innerHTML = list.map(m => `<div class="chat-line ${m.kind || 'sys'}">${esc(m.text)}</div>`).join('')
+    || '<div class="hint">还没有系统播报。</div>';
+  if (nearBottom) box.scrollTop = box.scrollHeight;
+}
+
 function renderChat() {
   const box = $('#chatList');
-  const list = chatMsgs.filter(m => {
-    if (chatCh === 'public') return m.ch === 'public';
-    if (chatCh === 'zone') return m.ch === 'zone';
-    return m.ch === 'private';
-  }).slice(-80);
-
+  if (!box) return;
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
-  box.innerHTML = list.map(m => {
-    if (m.kind === 'sys' || m.kind === 'win' || m.kind === 'death' || m.kind === 'gm') {
-      return `<div class="chat-line ${m.kind}">${esc(m.text)}</div>`;
+
+  let html = '';
+  if (chatCh === 'info') {
+    // 信息 = 你自己的行动记录 + 公共频道，按时间合成一条流
+    const items = [];
+    for (const l of (S && S.log) || []) items.push({ t: l.t || 0, kind: l.kind, text: l.text });
+    for (const m of chatMsgs) {
+      if (isSysMsg(m) || m.ch !== 'public') continue;
+      items.push({ t: m.at || 0, kind: 'say', text: m.text, who: m.from });
     }
-    const mine = m.from === USERNAME ? ' mine' : '';
-    const pv = m.ch === 'private' ? `<span class="pv">${m.from === USERNAME ? '→ ' + esc(m.to) : '私聊'}</span> ` : '';
-    return `<div class="chat-line${mine}">${pv}<span class="who">${esc(m.from)}</span>：${esc(m.text)}</div>`;
-  }).join('') || '<div class="hint">这里还没有人说话。</div>';
+    items.sort((a, b) => a.t - b.t);
+    html = items.slice(-140).map(it => {
+      if (it.who) {
+        const mine = it.who === USERNAME ? ' mine' : '';
+        return `<div class="chat-line${mine}"><span class="who">${esc(it.who)}</span>：${esc(it.text)}</div>`;
+      }
+      const tg = LOG_TAG[it.kind];
+      const tag = (tg && tg[0]) ? `<span class="ltag ${tg[1]}">${tg[0]}</span>` : '';
+      return `<div class="log-item ${it.kind || 'info'}">${tag}${esc(it.text)}</div>`;
+    }).join('');
+  } else {
+    const list = chatMsgs.filter(m => !isSysMsg(m) && m.ch === chatCh).slice(-80);
+    html = list.map(m => {
+      if (m.kind === 'sys' || m.kind === 'win' || m.kind === 'death' || m.kind === 'gm') {
+        return `<div class="chat-line ${m.kind}">${esc(m.text)}</div>`;
+      }
+      const mine = m.from === USERNAME ? ' mine' : '';
+      const pv = m.ch === 'private' ? `<span class="pv">${m.from === USERNAME ? '→ ' + esc(m.to) : '私聊'}</span> ` : '';
+      return `<div class="chat-line${mine}">${pv}<span class="who">${esc(m.from)}</span>：${esc(m.text)}</div>`;
+    }).join('');
+  }
+
+  box.innerHTML = html || '<div class="hint">这里还没有人说话。</div>';
   if (nearBottom) box.scrollTop = box.scrollHeight;
 }
 
@@ -3553,7 +3795,7 @@ async function sendChat() {
     if (!j.ok) { toast(j.msg || '发送失败'); return; }
     input.value = '';
     if (j.gm) toast(j.msg);
-    await chatPoll();
+    await poll();
   } catch (e) { toast(e.message); }
 }
 

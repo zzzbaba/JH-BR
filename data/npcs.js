@@ -190,9 +190,65 @@ const NPCS = [
   },
 ];
 
+
+// ============ 黑市 ============
+// 不在固定区块：由 world.tick 随机刷到某个区块，公屏播报，限时开摊。
+// 价格 = 基础价 × markup（3 倍）。高级武器平时买不到，只能靠抢，或者在这儿挨宰。
+const BLACK_MARKET = {
+  id: 'black_market',
+  name: '黑市商人',
+  title: '移动的黑市',
+  markup: 3,
+  stayMs: 8 * 60 * 1000,     // 存在 8 分钟
+  gapMs: 6 * 60 * 1000,      // 收摊后至少 6 分钟再开
+  greet: [
+    '一个裹着雨衣的人蹲在墙角，脚边压着两个长条帆布包。',
+    '"别问货哪来的。"他说，"问了我也不答。"',
+  ],
+  talks: [
+    '"这地方，命比货便宜。"',
+    '"我只在这儿待一会儿，想买趁早。"',
+    '"外面那把枪你留着也没用。卖我，我给你钱。"',
+  ],
+  // [物品 id, 基础价] —— 实际售价 = 基础价 × markup
+  goods: [
+    ['w30', 220], ['w27', 260], ['w34', 300],
+    ['w21', 340], ['w32', 420], ['w35', 700],
+    ['ammo_762r', 4], ['ammo_58r', 4], ['ammo_12ga', 6], ['ammo_rocket', 60],
+  ],
+};
+
+// ============ 佣兵头子（固定区块）============
+// 和黑市分开：黑市到处跑、只卖枪；佣兵头子常年蹲在西大垸，只负责雇人。
+// 放危险 2 的低危区块，新手也走得过去。
+const HIRE_TIERS = [
+  { tier: 1, price: 200, name: '刚退伍的', atk: 14, hp: 45 },
+  { tier: 2, price: 400, name: '打过硬仗的', atk: 22, hp: 80 },
+  { tier: 3, price: 800, name: '手上有人命的', atk: 34, hp: 130 },
+];
+
+const MERC_CAMP = {
+  id: 'merc_camp',
+  zone: 'z22',
+  name: '佣兵头子',
+  title: '西大垸的招募点',
+  greet: [
+    '一个断了半只耳朵的男人坐在折叠椅上，脚边立着三根不同颜色的布条。',
+    '"要人？"他抬了抬下巴，"按价钱挑，红的最贵。"',
+  ],
+  talks: [
+    '"他们不是我的人。"他说，"我只管介绍，出事别找我。"',
+    '"两百那个，能替你挨两下。八百那个，能替你杀一个人。"',
+    '"打完一场就散。想再雇，再来。"',
+  ],
+  hire: HIRE_TIERS,
+};
+function marketPrice(base) { return Math.round(base * BLACK_MARKET.markup); }
+function marketGoods() { return BLACK_MARKET.goods.map(([id, base]) => ({ id, base, price: marketPrice(base) })); }
+
 const BY_ID = Object.fromEntries(NPCS.map(n => [n.id, n]));
 const BY_ZONE = Object.fromEntries(NPCS.map(n => [n.zone, n]));
 
 function at(zoneId) { return BY_ZONE[zoneId] || null; }
 
-module.exports = { NPCS, BY_ID, BY_ZONE, at };
+module.exports = { NPCS, BY_ID, BY_ZONE, at, BLACK_MARKET, marketGoods, marketPrice, MERC_CAMP, HIRE_TIERS };

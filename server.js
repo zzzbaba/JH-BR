@@ -9,11 +9,14 @@ const zlib = require('zlib');
 const G = require('./game');
 const W = require('./world');
 const TRADE = require('./trade');
+const DISK = require('./storage-queue');
+let shuttingDown = false;
 const MAPD = require('./data/map');
 const ITEMD = require('./data/items');
 const { RECIPES } = require('./data/recipes');
 const { ACHIEVEMENTS, CAT_ORDER: ACH_CATS } = require('./data/achievements');
 const SHOP = require('./data/shop');
+const NPCD = require('./data/npcs');
 const { FINAL_BOSS } = require('./data/boss');
 const { STATUS } = require('./data/status');
 const { SEVEN_WA, LIUYING } = require('./data/special');
@@ -29,8 +32,39 @@ const SAVE_DIR = path.join(STORE, 'saves');
 // 而 rename 只要 1ms。先挪进来，重启不会加载（不在 SAVE_DIR 里），再后台异步清。
 const TRASH_DIR = path.join(STORE, '_trash');
 
-fs.mkdirSync(SAVE_DIR, { recursive: true });
-fs.mkdirSync(TRASH_DIR, { recursive: true });
+// 启动进度日志：直接进容器日志，排查「起来了但没监听」这类问题全靠它。
+// 必须用 fs.writeSync 直接写 fd 1：console.log 走的是带缓冲的流，
+// 进程一旦在后面卡住，缓冲区里的内容可能永远不落盘 —— 表现就是「一条日志都没有」。
+const bootLog = m => {
+  try { fs.writeSync(1, '[boot] ' + m + '\n'); }
+  catch (e) { try { console.log('[boot] ' + m); } catch (e2) { /* ignore */ } }
+};
+bootLog(`Node ${process.version} · 端口 ${process.env.PORT || 8123} · 主机 ${process.env.HOST || '127.0.0.1'} · 目录 ${STORE}`);
+
+// 启动自检：数据目录必须可写。
+// 容器里常见坑是挂载进来的 store 属主对不上（宿主 501 vs 容器 1000），
+// 以前会在写 admin.json 时抛异常、容器静默退出，日志里只有一个看不懂的退出码。
+// 这里主动探测并打印人话，退出码用 1（255 会被误认为是镜像/exec 问题）。
+(function checkStore() {
+  const probe = path.join(STORE, '.write-test');
+  try {
+    fs.mkdirSync(SAVE_DIR, { recursive: true });
+    fs.mkdirSync(TRASH_DIR, { recursive: true });
+    fs.writeFileSync(probe, 'ok');
+    fs.unlinkSync(probe);
+    bootLog('数据目录可写');
+  } catch (e) {
+    console.error('==============================================');
+    console.error('❌ 数据目录不可写：' + STORE);
+    console.error('   ' + e.code + ' ' + e.message);
+    console.error('');
+    console.error('   容器里请确认 ./store 已挂载且可写。宿主机执行：');
+    console.error('   chmod 777 store store/saves store/_trash');
+    console.error('   然后重启：docker compose restart');
+    console.error('==============================================');
+    process.exit(1);
+  }
+})();
 
 // ---------- 运行日志（内存环形缓冲） ----------
 // 后台「日志」页读这里。只放内存，不落盘 —— 重启就清空，避免把日志文件也变成性能负担。
@@ -98,7 +132,7 @@ process.on('unhandledRejection', e => {
 function readJSON(f, fb) {
   try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return fb; }
 }
-function writeJSON(f, obj) { fs.writeFileSync(f, JSON.stringify(obj, null, 2), 'utf8'); }
+function writeJSON(f, obj) { return DISK.enqueue(f, obj); }
 
 // ---------- 存储：内存优先（2026-10-20） ----------
 // 以前每个 action 都要 readdir + 读全部存档（282 个 ≈ 38ms），
@@ -108,6 +142,10 @@ const SAVES = new Map();      // user -> saveObj
 let USERS_DB = null;          // users.json 的内存副本
 const DIRTY = new Set();      // 待落盘的 user
 let usersDirty = false;
+let usersVersion = 0;
+let storageEpoch = 0;
+let storageFlush = null;
+const SAVE_VERSIONS = new Map();
 let storageReady = false;
 
 function loadAllStorage() {
@@ -128,20 +166,33 @@ function loadAllStorage() {
 }
 
 // 批量落盘：只写脏的，没改过就零 IO
-function flushStorage() {
+async function flushStorage() {
   if (!storageReady) return { saves: 0, users: false };
-  let n = 0;
-  for (const u of DIRTY) {
-    const s = SAVES.get(u);
-    if (!s) continue;
-    try { writeJSON(savePath(u), s); n++; } catch (e) { rlog('error', '落盘', `写 ${u} 失败：${e.message}`); }
-  }
-  DIRTY.clear();
-  let ud = false;
-  if (usersDirty && USERS_DB) {
-    try { writeJSON(USERS_FILE, USERS_DB); usersDirty = false; ud = true; } catch (e) { rlog('error', '落盘', `users.json 失败：${e.message}`); }
-  }
-  return { saves: n, users: ud };
+  if (storageFlush) return storageFlush;
+  storageFlush = (async () => {
+    const batch = [];
+    for (const u of DIRTY) {
+      const s = SAVES.get(u);
+      if (!s) continue;
+      const file = savePath(u);
+      batch.push({ u, file, version: SAVE_VERSIONS.get(u) || 0, rev: DISK.enqueue(file, s) });
+    }
+    const uv = usersVersion;
+    const ur = usersDirty && USERS_DB ? DISK.enqueue(USERS_FILE, USERS_DB) : 0;
+    let error;
+    try { await DISK.flush(); } catch (e) { error = e; }
+    let n = 0;
+    for (const b of batch) {
+      if (DISK.hasPersisted(b.file, b.rev) && (SAVE_VERSIONS.get(b.u) || 0) === b.version) {
+        DIRTY.delete(b.u); n++;
+      }
+    }
+    const ud = !!ur && usersVersion === uv && DISK.hasPersisted(USERS_FILE, ur);
+    if (ud) usersDirty = false;
+    if (error) { rlog('error', '落盘', error.code || error.message); throw error; }
+    return { saves: n, users: ud };
+  })();
+  try { return await storageFlush; } finally { storageFlush = null; }
 }
 
 function loadUsers() {
@@ -154,6 +205,8 @@ function saveUsers(db) {
   if (!storageReady) { writeJSON(USERS_FILE, db); return; }
   USERS_DB = db;
   usersDirty = true;
+  usersVersion++;
+  storageEpoch++;
 }
 
 function savePath(user) {
@@ -204,6 +257,8 @@ function writeSave(user, data) {
   if (!storageReady) { writeJSON(savePath(user), data); return; }
   if (data && !data.user) data.user = user;
   SAVES.set(user, data);
+  storageEpoch++;
+  SAVE_VERSIONS.set(user, (SAVE_VERSIONS.get(user) || 0) + 1);
   DIRTY.add(user);
 }
 // 删存档必须走这里：只删文件的话内存里还留着，玩家会「死而复生」
@@ -211,14 +266,12 @@ function writeSave(user, data) {
 // 所以统一「先 rename 进 _trash，再由 sweepTrash 后台异步清」，绝不阻塞事件循环。
 let trashSeq = 0;
 function deleteSave(user) {
-  if (user) { SAVES.delete(user); DIRTY.delete(user); }
   if (!user) return;
-  const f = savePath(user);
-  try {
-    fs.renameSync(f, path.join(TRASH_DIR, `${Date.now()}_${trashSeq++}_${path.basename(f)}`));
-    return;
-  } catch (e) { /* 跨盘或占用，退回直接删 */ }
-  try { fs.unlinkSync(f); } catch (e) { /* ignore */ }
+  SAVES.delete(user);
+  DIRTY.delete(user);
+  storageEpoch++;
+  SAVE_VERSIONS.set(user, (SAVE_VERSIONS.get(user) || 0) + 1);
+  DISK.remove(savePath(user));
 }
 
 // 后台清回收站：全程异步，不占主线程
@@ -300,7 +353,9 @@ function loadAdmin() {
   }
   return a;
 }
+bootLog('初始化管理员配置…');
 const ADMIN = loadAdmin();
+bootLog('管理员配置就绪');
 const adminTokens = new Map();
 const ADMIN_TTL = 12 * 3600 * 1000;   // 管理员 token 12 小时过期
 
@@ -318,11 +373,43 @@ function hashPwd(pwd, salt) {
 // ---------- 会话 ----------
 // token 不能永久有效：老版本只进不出，跑久了是内存泄漏 + 长期凭证风险
 const SESSION_TTL = 7 * 24 * 3600 * 1000;
+const SESSION_FILE = path.join(STORE, 'sessions.json');
 const sessions = new Map();     // token -> user
 const sessionAt = new Map();    // token -> 最后使用时间
 function newToken() { return crypto.randomBytes(24).toString('hex'); }
-function setSession(t, user) { sessions.set(t, user); sessionAt.set(t, Date.now()); }
-function dropSession(t) { sessions.delete(t); sessionAt.delete(t); }
+
+// 会话落盘：以前只在内存里，每次部署/重启全员掉线。
+// 现在写进 store/sessions.json，重启后按过期时间恢复。
+// 滑动续期（每个请求都会更新 at）不逐次写盘，60 秒最多写一次。
+let sessTimer = null;
+function persistSessions() {
+  const obj = {};
+  for (const [t, u] of sessions) obj[t] = { u, at: sessionAt.get(t) || 0 };
+  try { writeJSON(SESSION_FILE, obj); } catch (e) { /* 落盘失败不影响在线 */ }
+}
+function markSessions() {
+  if (sessTimer) return;
+  sessTimer = setTimeout(() => { sessTimer = null; persistSessions(); }, 60000);
+  if (sessTimer.unref) sessTimer.unref();
+}
+function setSession(t, user) { sessions.set(t, user); sessionAt.set(t, Date.now()); persistSessions(); }
+function dropSession(t) { sessions.delete(t); sessionAt.delete(t); persistSessions(); }
+
+// 启动时恢复未过期的会话
+(function loadSessions() {
+  const obj = readJSON(SESSION_FILE, null);
+  if (!obj || typeof obj !== 'object') return;
+  const now = Date.now();
+  let n = 0;
+  for (const [t, v] of Object.entries(obj)) {
+    if (!v || typeof v.u !== 'string') continue;
+    if (now - (v.at || 0) > SESSION_TTL) continue;
+    sessions.set(t, v.u);
+    sessionAt.set(t, v.at || now);
+    n++;
+  }
+  if (n) bootLog(`恢复 ${n} 个会话（重启不掉线）`);
+})();
 
 function bearer(req) {
   return (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '').trim();
@@ -334,6 +421,7 @@ function authUser(req) {
   const at = sessionAt.get(t) || 0;
   if (Date.now() - at > SESSION_TTL) { dropSession(t); return null; }
   sessionAt.set(t, Date.now());     // 滑动续期：一直在玩就不会掉线
+  markSessions();                    // 续期不逐次写盘，最多每分钟一次
   return u;
 }
 function authAdmin(req) {
@@ -348,6 +436,24 @@ function authAdmin(req) {
   // 完全不经过登录限流。现在只认登录签发的临时 token。
   return false;
 }
+
+// ---------- 输入净化 ----------
+// 直接把尖括号干掉：HTML 标签构造不出来，XSS 就无从谈起。
+// 客户端虽然有 esc()，但存储层也不该留脏数据 —— 后台页面、CSV 导出都会碰到这些字符串。
+// 注意别改成「转义成 &lt;」：前端 esc() 会再转一次，玩家看到的就是 &lt; 这种乱码。
+function sanitize(s, max = 200) {
+  return String(s == null ? '' : s)
+    .replace(/[<>]/g, '')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
+    .trim()
+    .slice(0, max);
+}
+
+// ---------- 聊天冷却 ----------
+// 没有冷却的话，一个脚本就能把公屏刷爆，所有人的聊天面板都别想看了。
+// GM 不受限（自己人，而且 GM 命令本身也是走这个接口）。
+const CHAT_CD = 2000;             // 两条消息最短间隔
+const chatLast = new Map();       // user -> 上次发言时间
 
 // ---------- 登录限流（要挂公网，必须防暴力破解）----------
 // 两层：① 同 IP+账号，防盯着一个号猜密码
@@ -488,12 +594,12 @@ const ASSETS = new Map();                 // name -> { key, ver, raw, gz, type }
 const TEXT_EXT = new Set(['.html', '.js', '.css', '.json', '.svg']);
 
 function assetMeta(name) {
+  const hit = ASSETS.get(name);
+  if (hit) return hit; // 不可变容器镜像：运行期直接用内存缓存
   const file = path.join(PUBLIC, name);
   let st;
   try { st = fs.statSync(file); } catch (e) { return null; }
-  const key = st.size + ':' + st.mtimeMs; // mtime 变了才重新读+压缩
-  const hit = ASSETS.get(name);
-  if (hit && hit.key === key) return hit;
+  const key = st.size + ':' + st.mtimeMs;
   const raw = fs.readFileSync(file);
   const ext = path.extname(name).toLowerCase();
   const meta = {
@@ -598,6 +704,21 @@ const META = {
   achievements: ACHIEVEMENTS.map(a => ({ id: a.id, title: a.title, icon: a.icon, tier: a.tier, cat: a.cat, desc: a.desc, hint: a.hint })),
   achCats: ACH_CATS,
   moods: G.MOODS,
+  market: {
+    name: NPCD.BLACK_MARKET.name,
+    markup: NPCD.BLACK_MARKET.markup,
+    goods: NPCD.marketGoods(),
+    greet: NPCD.BLACK_MARKET.greet,
+    talks: NPCD.BLACK_MARKET.talks,
+  },
+  merc: {
+    name: NPCD.MERC_CAMP.name,
+    title: NPCD.MERC_CAMP.title,
+    zone: NPCD.MERC_CAMP.zone,
+    hire: NPCD.HIRE_TIERS,
+    greet: NPCD.MERC_CAMP.greet,
+    talks: NPCD.MERC_CAMP.talks,
+  },
   attrTips: G.ATTR_TIPS,
   maxPlus: G.MAX_PLUS,
   fireModes: G.FIRE_MODES,
@@ -703,6 +824,10 @@ function roundInfo() {
     endsAt: r.endsAt, hardEndsAt: r.hardEndsAt,
     extended: r.extended, winner: r.winner, endReason: r.endReason, bossKilled: r.bossKilled,
     bossSpawned: !!r.bossSpawned,
+    endedAt: r.endedAt || null,
+    nextStartAt: r.nextStartAt || null,
+    autoStart: !!W.settings().autoStart,
+    restartDelayMs: W.RESTART_MS,
     warned5: !!r.warned5,
     // 空投：后台要看得到箱子在哪、还剩多久、下次什么时候
     supply: sp ? {
@@ -819,8 +944,40 @@ function runGm(user, char, raw) {
   return { ok: false, msg: `未知 GM 命令：${cmd}` };
 }
 
+// 状态快照：/api/state 和 /api/poll 共用一份逻辑，避免两处漂移
+function statePayload(user, isGM) {
+  const s = loadSave(user);
+  const round = roundInfo();
+  if (!s || !s.char) return { ok: true, hasSave: false, round, isGM };
+  const c = G.migrateChar(s.char);
+  // 轮次过期：上一轮的角色不能继续用
+  const stale = c.roundId !== round.id;
+  // 已结算（带走七娃后点了「结算」）：角色留在存档里做记录，但不再回到游戏界面
+  const settled = !!(c.flags && c.flags.settled);
+  // 轮次已经结束（时间到 / BOSS 被杀 / 全员出局）：角色不能再操作了。
+  // 唯一例外是胜利画面 —— 玩家得看到结局并亲手点「结算」，所以 sevenwin 还放行。
+  const roundOver = round.state !== 'running';
+  const terminal = c.scene === 'sevenwin';
+  const usable = !stale && !settled && (!roundOver || terminal);
+  const out = {
+    ok: true, hasSave: usable, stale, settled, state: usable ? G.snapshot(c) : null,
+    round, roundOver, username: user, isGM,
+    oldRound: stale ? c.roundId : null,
+  };
+  // 结算页战报：轮次结束时给，哪怕角色已经不能继续操作
+  if (roundOver && !stale) {
+    out.report = G.battleReport(c);
+    out.summary = {
+      kills: c.stats.kills || 0, turn: c.turn || 0, level: c.level || 1,
+      gold: c.gold || 0, alive: !!c.alive,
+    };
+  }
+  return out;
+}
+
 // ---------- 路由 ----------
 async function handleReq(req, res) {
+  if (shuttingDown) return json(res, 503, { ok: false, msg: '服务正在保存并退出。' });
   const url = req.url || '/';
 
   if (req.method === 'OPTIONS') {
@@ -842,16 +999,18 @@ async function handleReq(req, res) {
   // 别拿首页当探针：首页要走静态资源逻辑，还带 gzip。
   if (route === '/api/health') {
     const r = W.round();
-    const appJs = assetMeta('app.js');
-    return json(res, 200, {
-      ok: true,
+    const disk = DISK.status();
+    const healthy = storageReady && disk.ok && !shuttingDown;
+    return json(res, healthy ? 200 : 503, {
+      ok: healthy,
       uptime: Math.round(process.uptime()),
       memMB: Math.round(process.memoryUsage().rss / 1048576),
       saves: SAVES.size,
       dirty: DIRTY.size,
-      storage: storageReady,
+      storage: storageReady && disk.ok,
+      persistence: disk,
       round: { id: r.id, state: r.state },
-      build: appJs ? appJs.ver : '?',   // 前端版本号，一眼看出线上跑的是哪版
+      build: BUILD_VERSION,   // 前端版本号，一眼看出线上跑的是哪版
     });
   }
 
@@ -949,24 +1108,7 @@ async function handleReq(req, res) {
 
   // ===== 状态 =====
   if (route === '/api/state') {
-    const s = loadSave(user);
-    const round = roundInfo();
-    if (!s || !s.char) return json(res, 200, { ok: true, hasSave: false, round, isGM });
-    const c = G.migrateChar(s.char);
-    // 轮次过期：上一轮的角色不能继续用
-    const stale = c.roundId !== round.id;
-    // 已结算（带走七娃后点了「结算」）：角色留在存档里做记录，但不再回到游戏界面
-    const settled = !!(c.flags && c.flags.settled);
-    // 轮次已经结束（时间到 / BOSS 被杀 / 全员出局）：角色不能再操作了。
-    // 唯一例外是胜利画面 —— 玩家得看到结局并亲手点「结算」，所以 sevenwin 还放行。
-    const roundOver = round.state !== 'running';
-    const terminal = c.scene === 'sevenwin';
-    const usable = !stale && !settled && (!roundOver || terminal);
-    return json(res, 200, {
-      ok: true, hasSave: usable, stale, settled, state: usable ? G.snapshot(c) : null,
-      round, roundOver, username: user, isGM,
-      oldRound: stale ? c.roundId : null,
-    });
+    return json(res, 200, statePayload(user, isGM));
   }
 
   // ===== 开局 =====
@@ -989,7 +1131,7 @@ async function handleReq(req, res) {
     }
 
     const { name } = await readBody(req);
-    const c = G.createChar((name || user).toString().slice(0, 12));
+    const c = G.createChar(sanitize(name, 12) || user);
     c.roundId = r.id;
     // 账号级累计（跨轮次）：带七娃回家的次数
     c.career = Object.assign({ sevenWa: 0 }, (db.users[user] && db.users[user].career) || {});
@@ -1113,9 +1255,8 @@ async function handleReq(req, res) {
     const { ch, text, to } = await readBody(req);
     const c = getChar(user);
     const zone = c ? c.pos : null;
-    let body = String(text || '').trim();
+    let body = sanitize(text, 200);
     if (!body) return json(res, 400, { ok: false, msg: '空消息。' });
-    if (body.length > 200) body = body.slice(0, 200);
 
     // GM 命令
     if (body.startsWith(GM_PREFIX)) {
@@ -1133,8 +1274,16 @@ async function handleReq(req, res) {
       });
     }
 
+    // 普通玩家发言有冷却（GM 命令在上面已经 return 了，不受影响）
+    const lastAt = chatLast.get(user) || 0;
+    const leftMs = CHAT_CD - (Date.now() - lastAt);
+    if (leftMs > 0) {
+      return json(res, 429, { ok: false, msg: `说太快了，${Math.ceil(leftMs / 1000)} 秒后再发。` });
+    }
+    chatLast.set(user, Date.now());
+
     if (ch === 'private') {
-      const target = String(to || '').replace(/^@/, '').trim();
+      const target = sanitize(to, 16).replace(/^@/, '');
       if (!target) return json(res, 400, { ok: false, msg: '要发给谁？' });
       if (!db.users[target]) return json(res, 400, { ok: false, msg: '没有这个玩家。' });
       const m = W.pushChat({ ch: 'private', from: user, to: target, text: body, zone });
@@ -1158,6 +1307,30 @@ async function handleReq(req, res) {
     const msgs = W.getChat(since, user, zone);
     const maxId = msgs.length ? msgs[msgs.length - 1].id : since;
     return json(res, 200, { ok: true, msgs, maxId, round: roundInfo() });
+  }
+
+  // ===== 合并轮询 =====
+  // 以前前端跑两个定时器：聊天 2.2 秒一次、状态 5 秒一次。
+  // 现在合成一个请求，前端只留一个定时器 —— 连接数、鉴权、解析各少一半。
+  // state=1 时才带完整快照，客户端每两次带一次，所以状态刷新频率仍是 5 秒。
+  if (route === '/api/poll') {
+    const since = parseInt(qs.get('since'), 10) || 0;
+    const wantState = qs.get('state') === '1';
+    const c = getChar(user);
+    const zone = c ? c.pos : (qs.get('zone') || null);
+    const msgs = W.getChat(since, user, zone);
+    const maxId = msgs.length ? msgs[msgs.length - 1].id : since;
+    const out = { ok: true, msgs, maxId, round: roundInfo() };
+    if (wantState) {
+      const st = statePayload(user, isGM);
+      out.hasSave = st.hasSave;
+      out.state = st.state;
+      out.stale = st.stale;
+      out.settled = st.settled;
+      out.roundOver = st.roundOver;
+      out.oldRound = st.oldRound;
+    }
+    return json(res, 200, out);
   }
 
   // ===== 排行榜 =====
@@ -1340,8 +1513,11 @@ async function handleAdmin(route, req, res, qs) {
     })).sort((a, b) => b.n - a.n);
     let bytes = 0;
     try {
-      for (const f of fs.readdirSync(SAVE_DIR)) bytes += fs.statSync(path.join(SAVE_DIR, f)).size;
+      for (const f of await fs.promises.readdir(SAVE_DIR)) {
+        try { bytes += (await fs.promises.stat(path.join(SAVE_DIR, f))).size; } catch (e) { /* 文件可能已删除 */ }
+      }
     } catch (e) { /* ignore */ }
+    const trashCount = await fs.promises.readdir(TRASH_DIR).then(x => x.length).catch(() => 0);
     const titles = {};
     roundChars.forEach(s => {
       for (const k of Object.keys(s.char.achievements || {})) titles[k] = (titles[k] || 0) + 1;
@@ -1368,8 +1544,7 @@ async function handleAdmin(route, req, res, qs) {
       node: process.version,
       // 内存存储状态：内存里多少份、多少还没落盘
       storage: (() => {
-        let trash = 0;
-        try { trash = fs.readdirSync(TRASH_DIR).length; } catch (e) { trash = 0; }
+        const trash = trashCount;
         return { ready: storageReady, saves: SAVES.size, dirty: DIRTY.size, usersDirty, trash, trashBusy };
       })(),
       settings: W.settings(),
@@ -1444,17 +1619,37 @@ async function handleAdmin(route, req, res, qs) {
   // 只重读一个玩家的存档 —— 测试脚本改完文件后立刻同步，不用等 2 秒落盘周期
   if (route === '/api/admin/loadone' && req.method === 'POST') {
     const b = await readBody(req);
-    const s = readJSON(savePath(b.username), null);
+    const epoch = storageEpoch;
+    if (DIRTY.has(b.username) || DISK.pending.has(savePath(b.username))) return json(res, 409, { ok: false, msg: '该存档正在保存，请稍后重试。' });
+    const s = await fs.promises.readFile(savePath(b.username), 'utf8').then(JSON.parse).catch(e => { if (e.code === 'ENOENT') return null; throw e; });
     if (!s) return json(res, 404, { ok: false, msg: '存档文件不存在。' });
+    if (storageEpoch !== epoch) return json(res, 409, { ok: false, msg: '存档已变化，请重试。' });
     SAVES.set(b.username, s);
-    DIRTY.delete(b.username);
+    storageEpoch++;
+    SAVE_VERSIONS.set(b.username, (SAVE_VERSIONS.get(b.username) || 0) + 1);
     return json(res, 200, { ok: true });
   }
 
   // 重新从磁盘载入存储 —— 手改了 store/saves/*.json 之后用这个，不用重启
   if (route === '/api/admin/reload' && req.method === 'POST') {
-    flushStorage();                 // 先把内存里的改动落盘，别覆盖掉
-    const st = loadAllStorage();
+    const epoch = storageEpoch;
+    await flushStorage();
+    await DISK.drain();
+    const entries = await fs.promises.readdir(SAVE_DIR);
+    const nextSaves = new Map();
+    for (const name of entries.filter(x => x.endsWith('.json'))) {
+      const value = JSON.parse(await fs.promises.readFile(path.join(SAVE_DIR, name), 'utf8'));
+      if (!value || !value.user) throw new Error('存档格式错误，重载已取消。');
+      nextSaves.set(value.user, value);
+    }
+    const nextUsers = JSON.parse(await fs.promises.readFile(USERS_FILE, 'utf8'));
+    if (!nextUsers || !nextUsers.users) throw new Error('账号文件格式错误，重载已取消。');
+    if (storageEpoch !== epoch) return json(res, 409, { ok: false, msg: '读取期间数据已更新，请在空闲时重试。' });
+    SAVES.clear();
+    for (const [u, value] of nextSaves) SAVES.set(u, value);
+    USERS_DB = nextUsers;
+    storageEpoch++;
+    const st = { saves: SAVES.size, users: Object.keys(USERS_DB.users).length };
     rlog('sys', '存储', `手动重载：${st.saves} 个存档 / ${st.users} 个账号`);
     return json(res, 200, { ok: true, ...st });
   }
@@ -1612,7 +1807,7 @@ async function handleAdmin(route, req, res, qs) {
     if (typeof b.specialScale === 'number') s.specialScale = clampNum(b.specialScale, 0, 5);
     if (typeof b.onlineAware === 'boolean') s.onlineAware = b.onlineAware;
     if (typeof b.pvpChance === 'number') s.pvpChance = clampNum(b.pvpChance, 0, 100);
-    if (typeof b.autoStart === 'boolean') s.autoStart = b.autoStart;
+    if (typeof b.autoStart === 'boolean') W.setAutoStart(b.autoStart);
     if (typeof b.bossEnabled === 'boolean') s.bossEnabled = b.bossEnabled;
     W.save();
     return json(res, 200, { ok: true, settings: s });
@@ -1656,36 +1851,8 @@ async function handleAdmin(route, req, res, qs) {
     }
 
     const t0 = Date.now();
-    const stamp = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 14);
-    const grave = path.join(TRASH_DIR, `bulk_${stamp}_${process.pid}_${trashSeq++}`);
-    let swapped = false;
-    try {
-      fs.renameSync(SAVE_DIR, grave);          // 整个 saves 目录挪走，O(1)
-      fs.mkdirSync(SAVE_DIR, { recursive: true });
-      swapped = true;
-    } catch (e) {
-      rlog('warn', '清理', `目录置换失败，回退逐个删除：${e.message}`);
-      fs.mkdirSync(SAVE_DIR, { recursive: true });
-    }
-
-    if (swapped) {
-      // 保留的存档从墓地 copy 回来（copy ~2ms/个，30 个也就 60ms）
-      let bad = 0;
-      for (const s of keep) {
-        const name = path.basename(savePath(s.user));
-        try { fs.copyFileSync(path.join(grave, name), savePath(s.user)); }
-        catch (e) { bad++; rlog('warn', '清理', `拷回 ${s.user} 失败：${e.message}`); }
-      }
-      if (bad) rlog('warn', '清理', `${bad} 个存档没能拷回，请从 store/_trash 里捞`);
-      // 墓地整个交给后台异步删，接口立刻返回
-      fs.promises.rm(grave, { recursive: true, force: true }).catch(() => { });
-    } else {
-      // 兜底：逐个 rename 进 _trash（1ms/个，仍远快于 unlink）
-      for (const s of drop) deleteSave(s.user);
-    }
-
-    // 内存态同步清掉，否则 flushStorage 会把它们又写回磁盘
-    for (const s of drop) { SAVES.delete(s.user); DIRTY.delete(s.user); }
+    // 删除与保存共用串行队列，避免目录置换与正在保存的快照竞态。
+    for (const s of drop) deleteSave(s.user);
 
     const ms = Date.now() - t0;
     rlog('sys', '清理', `清掉 ${drop.length} 个旧轮存档，保留 ${keep.length} 个，耗时 ${ms}ms`);
@@ -1738,8 +1905,8 @@ async function handleAdmin(route, req, res, qs) {
       return json(res, 200, { ok: true, removed });
     }
     const exist = listSaves().filter(s => s.char && s.char.bot).length;
-    const want = Math.max(0, Math.min(30, Math.round(Number(b.n) || 0)));
-    const add = Math.max(0, Math.min(30 - exist, want));
+    const want = Math.max(0, Math.min(BOT_MAX, Math.round(Number(b.n) || 0)));
+    const add = Math.max(0, Math.min(BOT_MAX - exist, want));
     const NAMES = ['独狼', '夜枭', '铁皮', '老K', '麻雀', '灰狗', '断线', '北风', '药罐子', '三只手', '老鸦', '哑巴', '钉子', '石头', '哑火'];
     let made = 0;
     for (let i = 0; i < add; i++) {
@@ -1839,13 +2006,28 @@ async function handleAdmin(route, req, res, qs) {
       W.sys(`【空投】最后提醒：「${zone.name}」，8 分钟内去探索就能翻到，去晚了就被别人拿走了。`, 'win');
       rlog('sys', '空投', `管理员手动空投 → ${zone.name}`);
       return json(res, 200, { ok: true, round: roundInfo(), zone: zone.name });
+    } else if (b.action === 'market') {
+      // 手动开黑市：演示 / 测试用，也可以指定区块
+      if (W.round().state !== 'running') return json(res, 400, { ok: false, msg: '本轮没在跑。' });
+      const zone = b.zone ? (MAPD.BY_ID[b.zone] || null) : MAPD.MAP[Math.floor(Math.random() * MAPD.MAP.length)];
+      if (!zone) return json(res, 400, { ok: false, msg: '区块不存在。' });
+      W.get().market = { zone: zone.id, until: Date.now() + 8 * 60000 };
+      W.save();
+      W.sys(`【黑市】有人在「${zone.name}」摆了摊，只收现金，只待 8 分钟。`, 'win');
+      W.sys(`【黑市】重复一遍：「${zone.name}」。高级武器三倍价，还能雇人替你打一场。`, 'win');
+      rlog('sys', '黑市', `管理员手动开市 → ${zone.name}`);
+      return json(res, 200, { ok: true, round: roundInfo(), zone: zone.id, zoneName: zone.name });
+    } else if (b.action === 'marketOff') {
+      W.get().market = null;
+      W.save();
+      return json(res, 200, { ok: true });
     }
     return json(res, 200, { ok: true, round: roundInfo() });
   }
 
   if (route === '/api/admin/broadcast' && req.method === 'POST') {
     const b = await readBody(req);
-    const text = String(b.text || '').slice(0, 200);
+    const text = sanitize(b.text, 200);
     if (!text) return json(res, 400, { ok: false, msg: '空消息。' });
     W.pushChat({ ch: 'public', from: '系统', text: '[广播] ' + text, kind: 'gm' });
     return json(res, 200, { ok: true });
@@ -1883,21 +2065,43 @@ server.requestTimeout = 30000;     // 单个请求最多 30 秒，挡住慢速�
 
 // ---------- 启动 ----------
 W.load();
+bootLog('世界状态载入完成');
 // 存储载入内存（一次性，之后所有读写都走内存）
 {
   const st = loadAllStorage();
+  bootLog(`存储载入完成：${st.saves} 存档 / ${st.users} 账号`);
   rlog('sys', '存储', `载入 ${st.saves} 个存档 / ${st.users} 个账号到内存`);
 }
 // 每 2 秒把脏数据落盘；没改动就零 IO
-setInterval(() => { try { flushStorage(); } catch (e) { rlog('error', '落盘', e.message); } }, 2000);
+const storageTimer = setInterval(() => { flushStorage().catch(e => rlog('error', '落盘', e.code || e.message)); }, 2000);
+const BUILD_VERSION = (assetMeta('app.js') || {}).ver || '?';
+for (const name of ['index.html', 'style.css', 'pixel.js', 'admin.html']) assetMeta(name);
 // 退出前必须刷一次，否则最后 2 秒的操作会丢
 function flushAndExit(sig) {
-  try { const r = flushStorage(); rlog('sys', '存储', `收到 ${sig}，落盘 ${r.saves} 个存档后退出`); } catch (e) { /* ignore */ }
-  process.exit(0);
+  if (shuttingDown) return;
+  shuttingDown = true;
+  clearInterval(storageTimer);
+  W.stopTimer();
+  const deadline = setTimeout(() => { console.error('[storage] shutdown timeout'); process.exit(1); }, 15000);
+  server.close(async () => {
+    try {
+      if (sessTimer) { clearTimeout(sessTimer); sessTimer = null; }
+      persistSessions();          // 会话也要落盘，否则重启后这批人掉线
+      await flushStorage();
+      // 接入已关闭；若上一批写盘期间有更新，再保存到所有版本均确认。
+      while (DIRTY.size || usersDirty) await flushStorage();
+      await DISK.drain(12000);
+      clearTimeout(deadline);
+      process.exit(0);
+    } catch (e) {
+      console.error('[storage] shutdown failed', e.code || e.message);
+      process.exit(1);
+    }
+  });
 }
 process.on('SIGINT', () => flushAndExit('SIGINT'));
 process.on('SIGTERM', () => flushAndExit('SIGTERM'));
-process.on('beforeExit', () => { try { flushStorage(); } catch (e) { /* ignore */ } });
+// SIGINT/SIGTERM 会先停止接入，再等待异步保存；SIGKILL 无法保证未落盘数据。
 // 全服广播同时写进运行日志（开局 / 空投 / BOSS / 结束 / 死亡）
 W.setLogHook((text, kind) => {
   rlog(kind === 'warn' ? 'warn' : (kind === 'death' ? 'warn' : 'sys'), '全服', text);
@@ -1916,7 +2120,96 @@ W.startTimer();
 
 
 // 假人：每 10 秒动一动、回点血，看起来像真的在跑图
+// ---------- 假人 ----------
+// 上限 50 个。假人不自己写一套规则，直接调 G.act —— 跟真人走完全相同的逻辑，
+// 所以探索、遭遇、战斗、拾取、开箱、升级、掉血全都真实发生。
+const BOT_MAX = 50;
+
+function botMed(c) {
+  for (const it of c.bag || []) {
+    const d = ITEMD.ITEMS[it.id];
+    if (d && d.type === 'med') return it.id;
+  }
+  return null;
+}
+
+// 空手时从背包里装一把武器
+function botNeedWeapon(c) {
+  if (c.equip && c.equip.weapon) return null;
+  for (const it of c.bag || []) {
+    const d = ITEMD.ITEMS[it.id];
+    if (d && d.slot === 'weapon') return it.id;
+  }
+  return null;
+}
+
+// 走一步：朝「更有价值」的相邻区块偏一点，别纯随机乱晃
+function botMove(c) {
+  const z = MAPD.BY_ID[c.pos];
+  if (!z) return null;
+  const nb = MAPD.neighbors(z.x, z.y);
+  if (!nb.length) return null;
+  // 危险越高物资越多，但假人也会怕死：血少时往低危险走
+  const hpPct = G.hpMax(c) ? (c.hp || 0) / G.hpMax(c) : 1;
+  const scored = nb.map(t => {
+    let w = t.loot * 2 + t.danger;
+    if (hpPct < 0.5) w -= t.danger * 2;
+    return { t, w: Math.max(1, w) };
+  });
+  const total = scored.reduce((a, b) => a + b.w, 0);
+  let r = Math.random() * total;
+  for (const it of scored) { r -= it.w; if (r <= 0) return G.act(c, 'move', { x: it.t.x, y: it.t.y }); }
+  const t = scored[0].t;
+  return G.act(c, 'move', { x: t.x, y: t.y });
+}
+
+// 一步决策：先把眼前的事处理掉，再考虑探索
+function botStep(c) {
+  const hpMax = G.hpMax(c) || 1;
+  const hpPct = (c.hp || 0) / hpMax;
+  const ep = c.ep || 0;
+
+  switch (c.scene) {
+    case 'dead': case 'settled': case 'sevenwin': return null;
+    case 'encounter':
+      return G.act(c, 'encounter', { choice: hpPct > 0.5 ? 'fight' : 'spare' });
+    case 'battle': {
+      if (hpPct < 0.28) return G.act(c, 'battle', { choice: 'flee' });
+      if (hpPct < 0.5) {
+        const med = botMed(c);
+        if (med) return G.act(c, 'battle', { choice: 'item', itemId: med });
+      }
+      return G.act(c, 'battle', { choice: 'attack' });
+    }
+    case 'loot': return G.act(c, 'loot', { all: true });
+    case 'box': return G.act(c, 'box', { all: true });
+    case 'hostage': return G.act(c, 'hostage', { choice: 'ask' });
+    case 'npc': return G.act(c, 'npc', { choice: 'leave' });
+    case 'sevenwa': return G.act(c, 'sevenwa', { choice: 'talk' });
+    case 'liuying': return G.act(c, 'liuying', { choice: 'talk' });
+    case 'map': break;
+    default: return G.act(c, 'close');   // 未知场景兜底，防止卡死
+  }
+
+  // 血少先想办法活下来
+  if (hpPct < 0.45) {
+    const med = botMed(c);
+    if (med) return G.act(c, 'use', { itemId: med });
+    if (ep < 20) return G.act(c, 'rest');
+  }
+  if (ep < 10) return G.act(c, 'rest');
+
+  // 空手先装武器
+  const w = botNeedWeapon(c);
+  if (w) return G.act(c, 'equip', { itemId: w });
+
+  // 主要行为：探索为主，偶尔换地方
+  if (Math.random() < 0.65) return G.act(c, 'explore');
+  return botMove(c) || G.act(c, 'explore');
+}
+
 function tickBots() {
+  if (shuttingDown) return;
   try {
     const r = W.round();
     if (r.state !== 'running') return;
@@ -1924,14 +2217,16 @@ function tickBots() {
       if (!s.char || !s.char.bot || s.char.roundId !== r.id) continue;
       const c = s.char;
       if (c.alive === false || c.scene === 'dead') continue;
-      if (Math.random() < 0.5) {
-        const z = MAPD.BY_ID[c.pos];
-        if (z) {
-          const nb = MAPD.neighbors(z.x, z.y);
-          if (nb.length) c.pos = nb[Math.floor(Math.random() * nb.length)].id;
+      try {
+        botStep(c);
+        // 假人打真人时的回写：跟 /api/action 里那段保持一致
+        if (c._pvpResult) {
+          try { applyPvp(c, c._pvpResult); } catch (e) { /* ignore */ }
+          delete c._pvpResult;
         }
-      }
-      if (Math.random() < 0.3) c.hp = Math.min(G.hpMax(c), (c.hp || 0) + 5);
+        // 死了就别再动了
+        if (c.hp <= 0) { c.hp = 0; c.alive = false; c.scene = 'dead'; }
+      } catch (e) { /* 单个假人出错不影响其他人 */ }
       writeSave(s.user, s);
     }
   } catch (e) { /* ignore */ }
@@ -1956,11 +2251,16 @@ setInterval(sampleMem, 5000);
 // 每小时清一次过期会话 / 管理员 token / 限流记录，防止 Map 无限增长
 setInterval(() => {
   const now = Date.now();
-  for (const [t, at] of sessionAt) if (now - at > SESSION_TTL) dropSession(t);
+  let expired = 0;
+  for (const [t, at] of [...sessionAt]) {
+    if (now - at > SESSION_TTL) { sessions.delete(t); sessionAt.delete(t); expired++; }
+  }
+  if (expired) persistSessions();
   for (const [t, at] of adminTokens) if (now - at > ADMIN_TTL) adminTokens.delete(t);
   for (const [k, g] of loginGuard) {
     if ((!g.lockUntil || now > g.lockUntil) && now - g.first > LOGIN_WINDOW) loginGuard.delete(k);
   }
+  for (const [u, at] of chatLast) if (now - at > 3600000) chatLast.delete(u);
 }, 3600 * 1000);
 // 回收站清理：启动先扫一次（上次没删完的），之后每分钟一次，全程异步不阻塞
 sweepTrash();
@@ -1969,6 +2269,13 @@ rlog('sys', '服务', `启动完成 · 端口 ${PORT} · Node ${process.version}
 
 // HOST 默认只听本机；容器里必须设 HOST=0.0.0.0，否则 -p 端口映射进不来
 const HOST = process.env.HOST || '127.0.0.1';
+bootLog(`开始监听 ${HOST}:${PORT}`);
+// 监听失败必须显式退出：否则异常被 uncaughtException 吞掉，
+// 表现就是「容器 Up、日志正常、但端口没开」，极难排查
+server.on('error', e => {
+  console.error(`[boot] ❌ 监听 ${HOST}:${PORT} 失败：${e.code} ${e.message}`);
+  process.exit(1);
+});
 server.listen(PORT, HOST, () => {
   console.log(`江汉BR 已启动 → http://${HOST === '0.0.0.0' ? '127.0.0.1' : HOST}:${PORT}`);
   console.log(`后台管理   → http://127.0.0.1:${PORT}/admin.html  （密码见 store/admin.json）`);

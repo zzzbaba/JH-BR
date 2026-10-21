@@ -70,6 +70,7 @@ async function req(path, body, tk) {
   ok(pub.j.ok, '公共频道发言');
   const zone = await req('/api/chat/send', { ch: 'zone', text: '十号地集合' }, tb);
   ok(zone.j.ok, '区块频道发言');
+  await sleep(2200);   // 聊天有 2 秒冷却，同一个账号不能连发
   const pv = await req('/api/chat/send', { ch: 'private', to: B, text: '你好' }, ta);
   ok(pv.j.ok, '私聊发送');
   const pollB = await req('/api/chat/poll?since=0', null, tb);
@@ -96,6 +97,7 @@ async function req(path, body, tk) {
   const gmDeny = await req('/api/chat/send', { ch: 'public', text: '@//gm/ show me the money' }, tb);
   ok(!gmDeny.j.ok, 'B 未绑定 GM，命令被拒：' + gmDeny.j.msg);
 
+  await sleep(2200);
   const gmMoney = await req('/api/chat/send', { ch: 'public', text: '@//gm/ show me the money' }, ta);
   ok(gmMoney.j.ok, 'GM 加钱：' + gmMoney.j.msg);
   let stA = await req('/api/state', null, ta);

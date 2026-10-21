@@ -18,7 +18,7 @@
 你在维护一个已经能跑的项目：江汉BR（项目根目录）。
 先读项目根目录的 AI_CONTEXT.md，那是事实清单，里面的函数名和公式都是核对过的。
 读完先复述：项目由哪几个文件组成、角色对象有哪些字段、战斗伤害怎么算。
-复述正确后再动手。改动前告诉我你要改哪个文件的哪个函数，改完必须跑 §11 的九套测试。
+复述正确后再动手。改动前告诉我你要改哪个文件的哪个函数，改完必须跑 §11 的测试（九套游戏 + 三套功能）。
 不要引入任何 npm 依赖，不要用框架，不要改数据存储方式。
 ```
 
@@ -56,30 +56,35 @@
 
 | 文件 | 行数 | 职责 | 什么时候改它 |
 |---|---|---|---|
-| `server.js` | 1397 | HTTP 服务、46 个路由、账号、轮次结算、GM 命令、后台 API、假人/单轮控制、**运行日志/内存采样** | 加接口、改鉴权、改 GM |
-| `game.js` | 2187 | **全部游戏逻辑**（移动/事件/战斗/状态/合成/强化/商店/人质/特殊角色/成就/金币/PVP） | 几乎所有的玩法改动 |
-| `world.js` | 285 | 轮次状态机（45/60 分钟）、聊天存储、全局设置、历史榜单、**日志钩子** | 改轮次规则、加设置项 |
+| `server.js` | 2284 | HTTP 服务、**27 个后台接口**、账号、轮次结算、GM 命令、**假人 AI**、**输入净化/聊天冷却**、运行日志/内存采样 | 加接口、改鉴权、改 GM、改假人 |
+| `game.js` | 2516 | **全部游戏逻辑**（移动/事件/战斗/状态/合成/强化/商店/人质/特殊角色/成就/金币/PVP/**黑市/雇佣兵/战报**) | 几乎所有的玩法改动 |
+| `world.js` | 340 | 轮次状态机（45/60 分钟）、**自动开轮**、聊天存储、全局设置、历史榜单、**黑市刷新**、日志钩子 | 改轮次规则、加设置项 |
 | `trade.js` | 67 | 玩家交易（内存态，重启清空） | 改交易规则 |
+| `storage-queue.js` | 118 | **串行存储队列**：合并快照、临时文件+fsync+原子 rename、按版本确认、失败重试、`status()` 健康上报 | **一般不用改**，改落盘策略才碰 |
 | `data/map.js` | 131 | 64 区块、片区、危险度生成、邻居计算 | 改地图 |
-| `data/items.js` | 320 | **137 件物品**：武器22（火器 11） / 防具29 / 背包5 / 材料18 / 药物26 / 对敌6 / 弹药12 / 暗器9 / 配件6 / 特殊4；含 `FIRE_MODES` 射击模式表 + `REMOVED_WEAPONS` | 加物品 |
+| `data/items.js` | 324 | **137 件物品**：武器22（火器 11） / 防具29 / 背包5 / 材料18 / 药物26 / 对敌6 / 弹药12 / 暗器9 / 配件6 / 特殊4；含 `FIRE_MODES` 射击模式表 + `REMOVED_WEAPONS` | 加物品 |
 | `data/recipes.js` | 118 | **80 条合成配方**（医疗7/弹药12/武器21/防具20/背包5/暗器8/配件7） | 加配方 |
 | `data/enemies.js` | 77 | 20 种敌人 + 5 档掉落表 | 加敌人/调掉落 |
 | `data/events.js` | 201 | 8 个剧情 NPC、环境描写、地雷/宝箱文本 | 加剧情 |
 | `data/weather.js` | 57 | **6 种天气**：晴/阴/大风/暴雨/大雾/沙尘，影响攻击命中精力遭遇 | 加天气 |
 | `data/status.js` | 73 | 5 种状态定义 + 道具映射 | 改状态效果 |
-| `data/npcs.js` | 198 | **8 个常驻 NPC**：固定区块、可反复交谈、好感度、专属商店 | 加 NPC |
+| `data/npcs.js` | 254 | **8 个常驻 NPC** + **黑市 `BLACK_MARKET`**（随机区块/三倍价/8 分钟）+ **佣兵头子 `MERC_CAMP`**（固定 z22/三档雇佣） | 加 NPC、调黑市价目 |
 | `data/special.js` | 56 | 七娃、刘颖、12 道 ABC 题 | 改特殊角色 |
 | `data/achievements.js` | 383 | **53 个称号**（6 分类）+ 判定函数 + CAT_ORDER | 加称号 |
 | `data/shop.js` | 69 | 24 种商品 + 18 个商人分布 | 改商店 |
 | `data/boss.js` | 34 | 最终 BOSS「广播员」+ 掉落 | 改 BOSS |
-| `public/pixel.js` | 999 | **像素美术**：物品图标（24×24）+ 人物（24×32），全程序化绘制 | 改美术 |
-| `public/index.html` | 210 | 游戏页骨架 | 加界面元素 |
-| `public/app.js` | 3313 | **全部前端逻辑**（渲染/弹窗/地图绘制/聊天/悬浮提示/天气/特效/勾选丢弃） | 几乎所有的界面改动 |
-| `public/style.css` | 1622 | 全部样式（暗色废土 + 像素硬边框 + 血量三档/受击/状态/天气特效 + 强化/勾选） | 改视觉 |
-| `public/admin.html` | 1223 | 后台（单文件，内嵌 CSS+JS，含单轮控制页、**日志页**） | 改后台 |
+| `public/pixel.js` | 1038 | **像素美术**：物品图标（24×24）+ 人物（24×32），全程序化绘制 | 改美术 |
+| `public/index.html` | 224 | 游戏页骨架 | 加界面元素 |
+| `public/app.js` | 3808 | **全部前端逻辑**（渲染/弹窗/地图绘制/**地图标记**/聊天/**右栏两卡**/悬浮提示/天气/特效） | 几乎所有的界面改动 |
+| `public/style.css` | 1939 | 全部样式（暗色废土 + 像素硬边框 + 血量三档/受击/状态/天气特效 + 强化/勾选） | 改视觉 |
+| `public/admin.html` | 1277 | 后台（单文件，内嵌 CSS+JS，含单轮控制页、**日志页**） | 改后台 |
 
 **测试文件**：九套 —— `test.js` `test2.js` `test3.js` `test4.js` `api-test2.js` `api-test3.js` `api-test4.js` `pvp-test.js` `ui-test.js`
-**截图脚本**：`shot.js` ~ `shot20.js`（需 playwright-core，见 §11；`shot19` 丢弃滑块/遮罩关窗/称号分类/七娃结算，`shot20` 键盘方向键/空格）
+另有 `chat-test.js`（聊天冷却/净化）、`feature-test.js`（黑市/佣兵/战报）、`admin-test.js`（27 个后台接口全量体检）
+
+**历史截图脚本已归档到 `dev/legacy/`**（31 个，共 3488 行）—— 都是历次 UI 调试用的一次性验证脚本，
+硬编码了 Windows Chrome 路径，界面改版后跑不起来，**不要试图复用**。
+写新的验证脚本时用 `playwright-core` + 本机 Chrome，见 §11。
 
 ---
 
@@ -106,6 +111,11 @@
   bag: [ { id: 'med01', n: 3 }, ... ],   // 背包，同 id 堆叠（背包里的武器不记耐久）
   pos: 'z33',                        // 当前区块 id（z + y + x）
   turn: 0,                           // 回合数
+  // ---- 第 44/45 轮新增 ----
+  merc: null,                        // 雇佣兵 { tier, name, atk, hp, maxHp }，只帮一场，打完清空
+  keyLog: [],                        // 战报关键事件 [{ kind, turn, text }]，kind ∈ firstkill|firstgun|noise|death
+  //                                 和 c.log 分开：log 是 120 条流水会被冲掉，keyLog 只留能写进战报的
+  bot: false,                        // 假人标记（不进 users.json，只有存档）
   level: 1, exp: 0,                  // 等级 1-30，经验
   kills: 0,                          // 旧字段，等于 stats.kills（保留兼容）
   alive: true,
@@ -122,6 +132,17 @@
   pending: null,                     // 当前场景的临时数据
 }
 ```
+
+### 4.2.5 世界对象新增字段（`store/world.json`）
+
+```js
+market: null,        // 黑市 { zone, until }；null = 没开。由 world.tick 随机刷，8 分钟，收摊隔 6 分钟再刷
+nextMarketAt: 0,     // 下一次允许开市的时间戳
+```
+
+黑市商品和价目在 `data/npcs.js` 的 `BLACK_MARKET.goods`（`[id, 基础价]`），
+实际售价 = 基础价 × `markup(3)`，由 `NPCD.marketGoods()` 算。
+佣兵三档在 `MERC_CAMP.hire`，位置固定在 `MERC_CAMP.zone = 'z22'`。
 
 ### 4.2 世界对象 `world`（`store/world.json`）
 
@@ -601,7 +622,11 @@ GET  /api/meta            → 静态数据（地图/物品/配方/成就/商人/
 GET  /api/state           → { hasSave, stale, settled, roundOver, state, round, isGM }
 POST /api/newgame         { name } → 开新角色（同一轮死了会被拒）
 POST /api/action          { action, payload } → { ok, msg, state, round, achievements }
+GET  /api/poll?since=&state=0|1 → **合并轮询**：聊天 + （可选）完整快照。
+                          state=1 才带快照，客户端每两次带一次（状态仍是 5 秒一刷）
 POST /api/chat/send       { ch, text, to } → 含 GM 命令解析
+                          ⚠️ 同一账号 **2 秒冷却**（GM 命令除外），超限 429
+                          ⚠️ 正文/私聊目标/角色名都过 sanitize()，`<` `>` 会被删掉
 GET  /api/chat/poll?since= → 增量消息
 GET  /api/leaderboard
 GET  /api/achievements  → { all, cats, mine }（cats 是分类顺序）
@@ -617,7 +642,10 @@ GET  /api/export          → 导出自己存档（JSON）
 GET  /api/export/csv      → 导出自己存档（CSV，带 BOM，26 列）
 ```
 
-### 后台（`Authorization: Bearer <adminToken 或 admin:密码>`）
+### 后台（`Authorization: Bearer <adminToken>`）
+
+> ⚠️ **只认登录签发的 token**。以前允许 `Bearer admin:<明文密码>` 直通，等于绕过所有限流给爆破开后门，已封。
+> 所有 `/api/admin/*` 在 `handleReq` 里统一先过 `authAdmin`，再进独立的 `handleAdmin()`。
 
 ```
 POST /api/admin/login     { password } → { token }
@@ -639,17 +667,24 @@ POST /api/admin/bag       { username, action: add|remove|clear|clearAll, itemId,
 POST /api/admin/global    { action: heal|gold|item|invincible|reset, ... } → 批量
 POST /api/admin/gm        { username, isGM } → 绑定/解绑
 POST /api/admin/gmcmd     { username, cmd } → 管理员代发 GM 命令
-POST /api/admin/round     { action: start|end|forceEnd|supply, zone? }   supply = 手动空投
+POST /api/admin/round     { action: start|end|forceEnd|supply|market|marketOff, zone? }
+                          supply = 手动空投，market = 手动开黑市（可指定 zone），marketOff = 关黑市
+POST /api/admin/bots      { n } 或 { action:'clear' }  → 假人，上限 50，重复调用不会超
 POST /api/admin/broadcast { text }
 POST /api/admin/kick      { username }
 POST /api/admin/roundcfg  { zone, lootMul, force, forceChance } / { clear:true }
 GET  /api/admin/roundcfg  → { round, zones, overrides, bots }
-POST /api/admin/bots      { action: 'spawn'|'clear', n } → 假人（最多 30）
-POST /api/admin/password  { password }
+POST /api/admin/password  { old, next }  ⚠️ 改完所有旧 token 立即失效
 GET  /api/admin/export/csv → 导出全服存档 CSV
 ```
 
-`/api/action` 的 action 取值：`move explore rest encounter battle loot box hostage hostage_done npc equip unequip mod sort_bag use craft drop shop_buy shop_sell close settle impregnate`
+`/api/action` 的 action 取值：
+`move explore rest encounter battle loot box hostage hostage_done sevenwa liuying
+ equip unequip mod sort_bag use craft trap enhance drop shop_buy shop_sell
+ npc market hire close settle tease`
+
+> `market` = 黑市买卖（`payload.choice: buy|talk`），`hire` = 佣兵头子（`payload.choice: hire|talk`）。
+> 两者都要求 `c.scene === 'map'` 且站在对应区块，**不切 scene**（用弹窗交互）。
 
 ### GM 命令（聊天框输入，前缀 `@//gm/`）
 
@@ -672,9 +707,37 @@ S         // /api/state 返回的快照，null 表示没有角色
 ROUND     // 轮次信息
 TOKEN / USERNAME / IS_GM
 chatSince / chatMsgs      // 聊天增量游标
-ctab / chatCh             // 当前面板 tab / 聊天频道
+chatCh                    // 聊天频道，取值 'info' | 'zone' | 'private'（'info' = 个人日志+公共频道）
 tipTarget                 // 悬浮提示当前目标
 ```
+
+### 右栏：两张卡 + 标题内按钮切换（第 44 轮定稿）
+
+```
+#panelTop   [公屏*] [排名]  + 右侧常显「N 人在场」
+            #paneSys（系统播报，只渲染 from==='系统' 的聊天）
+            #paneRank（本轮排行榜）
+#panelInfo  [信息*] [区块] [私聊]
+            #chatList 一个窗口 —— 'info' 时把 c.log 和公共频道**按时间戳合成一条流**
+            下面是输入框
+```
+
+- `#logList` 已删除，`renderLog()` 开头有 `if (!box) return` 兜底
+- `.pane` 在 `#panelTop` 里必须写死 `height: 150px`，否则 `flex:1 1 0` 会塌成 0（踩坑 #55）
+- 频道 tab 的类名是 **`.ctab`**（不是 `.chtab`），改样式时别搞错（踩坑 #54）
+
+### 提示条（toast）
+
+`noticeLatestLog()` 把 `warn/good/bad/loot/story/npc` 类日志弹成底部提示条。
+`positionToast()` 以 `.map-wrap` 的 `getBoundingClientRect()` 为准定位：
+水平居中到地图、底边贴地图下沿往上 8px；等待/结算界面没有地图时退回 `bottom:40px`。
+
+### 地图标记
+
+右上角小圆点，和商人金点同一套位置逻辑：
+- **红点 + 光晕** = 黑市（限时，`S.market.zone` 匹配时画）
+- **蓝点** = 佣兵招募点（常驻，`META.merc.zone` 匹配时画）
+- 鼠标悬停的 `#mapTip` 会多出一行红/蓝强提醒（`★ 黑市在此 · 剩 04:08`）
 
 ### 三个界面层
 
@@ -1171,6 +1234,14 @@ node test4.js       # 耐久/改装/NPC/配方/精力机制/摊主换物/批量�
 node api-test2.js   # 轮次 / 商店 / 聊天 / GM / 交易 / 后台基础
 node api-test3.js   # 后台统计 / 批量操作 / 代发 GM / 新设置项是否生效
 node api-test4.js   # NPC 接口 / 改装接口 / CSV 导出（含 BOM 校验）
+```
+
+**新增的功能测试**（需要服务器）：
+
+```bash
+node chat-test.js     # 聊天 2 秒冷却（拦/放行/按账号隔离）+ 输入净化 + GM 不受限
+node feature-test.js  # 黑市价目 / 买卖 / 收摊 / 佣兵三档 / 拒绝分支 / 战报三行
+node admin-test.js    # 27 个后台接口全量体检（含 5xx 检测、慢请求检测）
 ```
 
 **第八套：玩家对战**（需要服务器）：

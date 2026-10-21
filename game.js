@@ -99,6 +99,10 @@ function usedSlots(c) {
 function addItem(c, id, n = 1) {
   const d = ITEMS[id];
   if (!d) return { ok: false, added: 0 };
+  // 战报：第一次拿到火器（有 ammo 字段的就是枪）
+  if (d.type === 'weapon' && d.ammo && !(c.keyLog || []).some(e => e.kind === 'firstgun')) {
+    keyEvent(c, 'firstgun', `第 ${c.turn || 0} 回合，你捡到第一把枪：${d.name}。`);
+  }
   let added = 0;
   // 先堆叠
   for (const it of c.bag) {
@@ -112,6 +116,9 @@ function addItem(c, id, n = 1) {
   while (added < n) {
     if (usedSlots(c) + d.size > slots(c)) break;
     const can = Math.min(d.stack, n - added);
+    // 防死循环：如果物品数据异常导致 can 算出 0/NaN，这里必须退出，
+    // 否则 while 原地打转，事件循环被占死，整个服务连静态页都打不开。
+    if (!(can > 0)) break;
     c.bag.push({ id, n: can });
     added += can;
   }
@@ -151,6 +158,38 @@ function log(c, text, kind = 'info') {
   if (!c.log) c.log = [];
   c.log.push({ t: Date.now(), text, kind });
   if (c.log.length > 120) c.log = c.log.slice(-120);
+}
+
+// ---------- 战报：关键事件 ----------
+// 和 c.log 分开：log 是全部流水（120 条，会被冲掉），keyLog 只留能写进战报的几条。
+// kind: firstkill | firstgun | noise | death
+function keyEvent(c, kind, text) {
+  if (!c.keyLog) c.keyLog = [];
+  // 首杀/首枪/死亡只记第一次；被围可以有多次，取最后一次
+  if (kind !== 'noise' && c.keyLog.some(e => e.kind === kind)) return;
+  c.keyLog.push({ kind, turn: c.turn || 0, text });
+  if (c.keyLog.length > 20) c.keyLog = c.keyLog.slice(-20);
+}
+
+// 结算页的三行战报
+function battleReport(c) {
+  const ev = c.keyLog || [];
+  const last = k => { const a = ev.filter(x => x.kind === k); return a.length ? a[a.length - 1] : null; };
+  const first = last('firstkill'), gun = last('firstgun'), noise = last('noise'), death = last('death');
+  const lines = [];
+
+  if (first) lines.push(first.text + (gun ? ' ' + gun.text : ''));
+  else if (gun) lines.push(gun.text + ' 但一直没敢开。');
+  else lines.push(`你在这一轮走了 ${c.turn || 0} 个回合，一把枪都没摸到。`);
+
+  if (noise) lines.push(noise.text);
+  else lines.push('你一直很安静，没惹出什么动静。');
+
+  if (death) lines.push(death.text);
+  else if (c.alive) lines.push('你还活着——这一轮结束的时候，你还在油田里。');
+  else lines.push('最后你没撑住。');
+
+  return lines;
 }
 
 // ---------- 创建角色 ----------
@@ -431,7 +470,18 @@ function toMap(c) { c.scene = 'map'; c.pending = null; }
 
 function checkDeath(c) {
   // 只有血量归零才算死。精力见底只是「动不了」，不是出局
-  if (c.hp <= 0) { c.hp = 0; c.alive = false; c.scene = 'dead'; c.pending = { reason: 'hp' }; log(c, '你的血耗尽了。视野从边缘开始变黑。', 'bad'); return true; }
+  if (c.hp <= 0) {
+    const p0 = c.pending || {};
+    const killer = (p0.pvp && p0.pvp.name) || (p0.enemy && p0.enemy.name) || null;
+    const z0 = MAPD.BY_ID[c.pos];
+    c.hp = 0; c.alive = false; c.scene = 'dead'; c.pending = { reason: 'hp' };
+    log(c, '你的血耗尽了。视野从边缘开始变黑。', 'bad');
+    keyEvent(c, 'death', killer
+      ? `最后死在「${z0 ? z0.name : '不明位置'}」，动手的是${killer}。`
+      : `最后死在「${z0 ? z0.name : '不明位置'}」，身边一个人也没有。`);
+    c.merc = null;
+    return true;
+  }
   if (c.ep < 0) c.ep = 0;
   return false;
 }
@@ -549,6 +599,7 @@ function startBattle(c, enemy, firstStrike) {
     hostage: p.hostage || null,
     npc: p.npc || null,
     boss: !!p.boss,
+    merc: c.merc ? Object.assign({}, c.merc) : null,
     pvp: p.pvp || null,   // 玩家遭遇：进战斗时必须带着，否则结算时不知道打的是谁
   };
   if (firstStrike) {
@@ -779,6 +830,17 @@ function enemyTurn(c) {
     pLog.push(`${e.name}击中了你——子弹像穿过空气一样飞过去。`);
     return pLog;
   }
+  // 雇佣兵挡在前面：先替他挨，扛不住才轮到你
+  if (p.merc && p.merc.hp > 0) {
+    p.merc.hp -= dmg;
+    if (p.merc.hp > 0) {
+      pLog.push(`${e.name}扑上来，${p.merc.name}挡在你前面，替他挨了 ${dmg} 点。`);
+    } else {
+      pLog.push(`${e.name}这一下太重，${p.merc.name}替你挡下后倒了下去。`);
+      p.merc = null;
+    }
+    return pLog;
+  }
   c.hp -= dmg;
   pLog.push(`${e.name}击中你，损失 ${dmg} 点生命${atkMul < 1 ? '（手脚发软，力道轻了不少）' : ''}。`);
   return pLog;
@@ -826,6 +888,11 @@ function finishBattle(c, victory) {
   if (!victory) return;
   c.kills++;
   c.stats.kills++;
+  if (c.stats.kills === 1) {
+    const w0 = weaponOf(c);
+    keyEvent(c, 'firstkill', `第 ${c.turn || 0} 回合，你用${w0 ? w0.name : '赤手空拳'}放倒了一个${e.name}。`);
+  }
+  c.merc = null;   // 雇佣兵只打一场
   if (p.lastFist) c.stats.fistKills++;   // 赤手空拳打死人（成就用）
   // 真人比 NPC 值钱：打人风险高得多，经验给到 2.5 倍
   let expGain = EXP_BY_TIER[e.tier] || 15;
@@ -879,7 +946,10 @@ function finishBattle(c, victory) {
     wave: p.wave,
     zoneName: p.zoneName,
   };
-  if (canChain) log(c, '远处传来脚步声——不止一个人。', 'warn');
+  if (canChain) {
+    log(c, '远处传来脚步声——不止一个人。', 'warn');
+    keyEvent(c, 'noise', `第 ${c.turn || 0} 回合你弄出的动静引来了人，前后围上来 ${p.wave + 1} 个。`);
+  }
 }
 
 // ---------- 行动分发 ----------
@@ -911,6 +981,8 @@ function act(c, action, payload = {}) {
     case 'shop_buy': r = doShopBuy(c, payload); break;
     case 'shop_sell': r = doShopSell(c, payload); break;
     case 'npc': r = doNpc(c, payload); break;
+    case 'market': r = doMarket(c, payload); break;
+    case 'hire': r = doHire(c, payload); break;
     case 'close': r = doClose(c); break;
     case 'settle': r = doSettle(c); break;
     case 'tease': r = doTease(c, payload); break;
@@ -1207,6 +1279,12 @@ function doBattle(c, { choice, itemId, n, plus }) {
       const r = playerAttack(c, true);
       if (!r.ok) { p.log.push(r.msg); return { ok: false, msg: r.msg }; }
       p.log.push(r.msg);
+      // 雇佣兵跟着补一下
+      if (p.merc && p.merc.hp > 0 && e.hp > 0) {
+        const md = Math.max(1, Math.round(p.merc.atk * rf(0.85, 1.15)));
+        e.hp -= md;
+        p.log.push(`${p.merc.name}紧跟着补了一下，${e.name}损失 ${md} 点生命。`);
+      }
     }
     if (e.hp <= 0) { finishBattle(c, true); return { ok: true, msg: '' }; }
     if (runEnemyTurn(c)) return { ok: true, msg: '' };
@@ -1251,6 +1329,7 @@ function doBattle(c, { choice, itemId, n, plus }) {
     const chance = p.boss ? 8 : clamp(45 + effAttr(c, 'luk') * 0.45 - e.tier * 3 + (p.smoke > 0 ? 30 : 0), 10, 95);
     if (Math.random() * 100 < chance) {
       log(c, `你转身就跑，${e.name}没有追上来。`, 'good');
+      c.merc = null;
       if (p.pvp) c._pvpResult = { user: p.pvp.user, name: p.pvp.name, win: false };
       toMap(c);
       return { ok: true, msg: '' };
@@ -1836,6 +1915,64 @@ function doTease(c, { index }) {
   return { ok: true, msg: '没成。' };
 }
 
+// ---------- 黑市 ----------
+// 位置由 world.tick 随机决定，这里只负责「人到了之后能干什么」
+function doMarket(c, { choice, itemId, tier }) {
+  const mk = W.market();
+  if (!mk) return { ok: false, msg: '黑市已经收摊了。' };
+  if (c.pos !== mk.zone) return { ok: false, msg: '黑市不在这里。' };
+  const BM = NPCD.BLACK_MARKET;
+
+  // 黑市用弹窗交互，不切 scene：玩家站在区块里就能买
+  if (c.scene !== 'map') return { ok: false, msg: '先处理眼前的事。' };
+
+  if (choice === 'talk') {
+    const line = pick(BM.talks);
+    log(c, `${BM.name}：${line}`, 'npc');
+    return { ok: true, msg: line };
+  }
+
+  if (choice === 'buy') {
+    const g = NPCD.marketGoods().find(x => x.id === itemId);
+    if (!g) return { ok: false, msg: '他不卖这个。' };
+    if ((c.gold || 0) < g.price) return { ok: false, msg: `钱不够，要 ¥${g.price}，你有 ¥${c.gold || 0}。` };
+    const r = addItem(c, itemId, 1);
+    if (!r.ok) return { ok: false, msg: '背包放不下。' };
+    c.gold -= g.price;
+    c.stats.bought++;
+    log(c, `在黑市买了${ITEMS[itemId].name}，花 ¥${g.price}（三倍价）。`, 'good');
+    return { ok: true, msg: `买下 ${ITEMS[itemId].name}` };
+  }
+
+  return { ok: false, msg: '无效选择。' };
+}
+
+// ---------- 佣兵头子（固定区块，只管雇人）----------
+function doHire(c, { choice, tier }) {
+  const camp = NPCD.MERC_CAMP;
+  if (c.pos !== camp.zone) return { ok: false, msg: '招募点不在这里。' };
+  if (c.scene !== 'map') return { ok: false, msg: '先处理眼前的事。' };
+
+  if (choice === 'talk') {
+    const line = pick(camp.talks);
+    log(c, `${camp.name}：${line}`, 'npc');
+    return { ok: true, msg: line };
+  }
+
+  if (choice === 'hire') {
+    const def = camp.hire.find(h => h.tier === Number(tier));
+    if (!def) return { ok: false, msg: '没有这一档。' };
+    if (c.merc) return { ok: false, msg: `你身边已经跟着一个${c.merc.name}了。` };
+    if ((c.gold || 0) < def.price) return { ok: false, msg: `要 ¥${def.price}，你钱不够。` };
+    c.gold -= def.price;
+    c.merc = { tier: def.tier, name: def.name, atk: def.atk, hp: def.hp, maxHp: def.hp };
+    log(c, `雇了一个${def.name}（攻 ${def.atk} / 血 ${def.hp}），只帮你打一场。`, 'good');
+    return { ok: true, msg: `雇到了${def.name}` };
+  }
+
+  return { ok: false, msg: '无效选择。' };
+}
+
 // ---------- 以物换物 ----------
 // 摊主这类剧情会真的拿走一件东西：只挑背包里最不值钱的，
 // 不碰装备、不碰特殊道具（钥匙/地图）、不碰改装件，避免玩家被坑到没法继续
@@ -2280,6 +2417,8 @@ function snapshot(c) {
 
   return {
     scene: c.scene,
+    market: W.market(),
+    merc: c.merc || null,
     char: {
       name: c.name,
       attrs: c.attrs,
@@ -2373,5 +2512,5 @@ module.exports = {
   ATTRS, ATTR_CN, ATTR_TIPS, SLOT_CN, BASE_SLOTS, ITEMS, MAX_LEVEL, MOODS,
   MAX_PLUS, plusOf, plusMul, entryDmg, entryDef, findCopies, FIRE_MODES,
   AFFIX_ATTRS, AFFIX_MAX, affixText, seededAffix,
-  scoreOf, RANK_WEIGHT,
+  scoreOf, RANK_WEIGHT, battleReport, keyEvent,
 };

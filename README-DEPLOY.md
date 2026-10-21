@@ -22,6 +22,10 @@ docker compose version  # 有输出即可
 
 > 用 Docker Desktop 也行，命令完全一样。
 
+**无人值守必做**：打开 OrbStack 设置 → General → 勾上 **Launch at login**。
+OrbStack 是菜单栏 App，没登录/没启动就没有 docker 引擎，重启后服务不会自己回来。
+（`deploy.sh` 检测到引擎没跑会自动尝试 `open -a OrbStack`，但开机自启更省事。）
+
 ---
 
 ## 二、部署（一条命令）
@@ -84,6 +88,8 @@ cat store/admin.json
 ./deploy.sh --restart    # 重启（会先落盘再重启，不丢数据）
 ./deploy.sh --stop       # 停止
 ./deploy.sh --destroy    # 删除容器，./store 数据保留
+./deploy.sh --diag       # 出问题时先跑这个：环境/容器/日志/权限/端口一次全打出来
+./deploy.sh --reset      # 彻底重来：删容器+删镜像+清空 store（会二次确认）
 
 ./smoke-test.sh          # 冒烟测试：10 项，全绿说明线上真的能用
 ./smoke-test.sh http://别的地址:8123
@@ -127,10 +133,10 @@ curl -s http://127.0.0.1:8123/api/health
 
 ## 六、数据与备份
 
-所有状态都在 **`./store`** 这一个目录里：
+所有状态都在 **docker 卷 `jianghan-br-store`** 里（不是项目目录）：
 
 ```
-store/
+jianghan-br-store/
 ├── admin.json     后台密码
 ├── users.json     账号表
 ├── world.json     世界状态（当前轮次、聊天、空投）
@@ -138,18 +144,43 @@ store/
 └── _trash/        删除缓冲，会自动清空
 ```
 
-备份 = 拷走整个 `store` 目录。恢复 = 拷回来再 `--restart`。
+**为什么用卷而不是 `./store` 目录？**
+`storage-queue.js` 落盘时会 `fsync`（`handle.sync()`）。fsync 在 virtiofs
+（macOS 的 bind mount）上会挂死——进程卡进 D 状态，连 SIGKILL 都杀不掉，
+容器「Up 但没响应」，还会把整个 Docker 引擎拖到 420% CPU。
+卷在 VM 内的 ext4 上，fsync 正常。**这是踩过的坑，别改回 bind mount。**
+
+### 备份
 
 ```bash
-# 每天凌晨 3 点备份，保留 7 天
+# 手动备份到当前目录
+docker run --rm -v jianghan-br-store:/d -v "$PWD":/b node:22-alpine \
+  tar czf /b/br-$(date +%F).tgz -C /d .
+
+# 每天凌晨 3 点，保留 7 天
 crontab -e
-0 3 * * * cd ~/jianghan-br && tar czf ~/backup/br-$(date +\%F).tgz store && find ~/backup -name 'br-*.tgz' -mtime +7 -delete
+0 3 * * * cd ~/Desktop/jianghan-br && docker run --rm -v jianghan-br-store:/d -v "$PWD":/b node:22-alpine tar czf /b/br-$(date +\%F).tgz -C /d . && find . -name 'br-*.tgz' -mtime +7 -delete
 ```
 
-**注意**：服务是「内存优先 + 每 2 秒批量落盘」。直接 `docker kill` 最多丢 2 秒数据，
-用 `./deploy.sh --stop` 或 `docker compose stop` 会走 SIGTERM，先落盘再退出。
+恢复：
 
----
+```bash
+docker run --rm -v jianghan-br-store:/d -v "$PWD":/b node:22-alpine \
+  sh -c 'cd /d && tar xzf /b/br-2026-10-21.tgz'
+./deploy.sh --restart
+```
+
+### 迁移老数据
+
+```bash
+./deploy.sh --data /path/to/old-store
+```
+
+会把那个目录的内容灌进 docker 卷。
+
+**注意**：服务是「内存优先 + 串行队列落盘」，正常退出会 drain。
+直接 `docker kill` 可能丢最后几百毫秒的数据。
+用 `./deploy.sh --stop` 或 `docker compose stop` 会走 SIGTERM，先落盘再退出。
 
 ## 七、对外网开放（重要）
 
@@ -245,9 +276,48 @@ lsof -nP -iTCP:8123 -sTCP:LISTEN
 前端资源版本号是按文件内容哈希算的，玩家刷新页面就会拿到新版，不用清缓存。
 
 **Q：日志里报 `EACCES: permission denied, open '/app/store/...'`？**
-容器用非 root 的 `node` 用户跑，个别环境下 bind mount 的属主对不上。
-临时办法：在 `docker-compose.yml` 的服务里加一行 `user: "0:0"`（用 root 跑），
-或者 `chmod -R 777 store` 后重启。macOS + OrbStack 正常情况下不会遇到。
+
+容器里以 `node`（uid 1000）运行，而 macOS 的 bind mount 属主是你（uid 501），对不上就写不了。
+`deploy.sh` 每次启动前会执行 `chmod 777 store store/saves store/_trash`，正常情况下不会遇到。
+
+如果手动改过 compose 或用 `docker compose up` 绕过脚本，补一下：
+
+```bash
+chmod 777 store store/saves store/_trash
+docker compose restart
+```
+
+服务启动时会自检数据目录：写不进去会直接打印
+`❌ 数据目录不可写：/app/store` 并退出码 1，不会静默死掉。
+
+**Q：`cannot stop container: tried to kill container, but did not receive an exit event`？**
+
+容器里的进程卡在**不可中断的系统调用**里，连 SIGKILL 都杀不掉。典型表现是三件事同时出现：
+容器状态 `Up`、服务不响应、`docker compose down` 卡 30 多秒后报这个错。
+
+按顺序试：
+
+```bash
+docker rm -f jianghan-br          # 强制删
+
+# 还删不掉，就重启 Docker 引擎（任选其一）：
+# 菜单栏 OrbStack 图标 → Quit，再重新打开
+osascript -e 'quit app "OrbStack"' ; sleep 3 ; open -a OrbStack
+# 实在不行重启 Mac mini
+```
+
+**原因**：旧版入口脚本里有 `chown -R`，在 virtiofs（macOS 的 bind mount）上递归改属主会卡死。
+新版本已改成非递归，只改三个目录本身，不会再有这个问题。
+
+**Q：`./deploy.sh` 卡在「等待服务就绪」不动？**
+
+新版本会在 60 秒后自动打印容器状态和最近 40 行日志，直接照着日志看原因。
+最常见的还是上面的权限问题。也可以手动看：
+
+```bash
+docker compose ps
+docker compose logs --tail=40
+```
 
 **Q：数据会丢吗？**
 只要 `./store` 目录还在就不会。容器删了、镜像删了都不影响。

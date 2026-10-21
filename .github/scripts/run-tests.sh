@@ -45,7 +45,8 @@ node server.js > /tmp/server.log 2>&1 &
 SERVER_PID=$!
 READY=0
 for i in $(seq 1 40); do
-  if curl -sf --max-time 2 http://127.0.0.1:8123/api/health > /dev/null 2>&1; then
+  # --noproxy：本地若有 http_proxy 环境变量，curl 会连 127.0.0.1 也走代理并拿到 502
+  if curl -sf --noproxy '*' --max-time 2 http://127.0.0.1:8123/api/health > /dev/null 2>&1; then
     READY=1
     echo "服务器就绪（${i}s，pid=$SERVER_PID）"
     break

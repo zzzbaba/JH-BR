@@ -1783,3 +1783,157 @@ img.px-art, img.px-item { image-rendering: pixelated; -ms-interpolation-mode: ne
 /* 品质标签跟描述同一行，描述占满左侧 */
 .tip-subrow { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 0; }
 .tip-subrow .tip-desc { flex: 1; min-width: 0; margin-bottom: 0; }
+
+/* ============ 右栏三块：排名 / 公屏 / 信息 ============ */
+/* 以前是一个卡片三个 tab，玩家经常不知道点哪儿切换；改成三块同时可见 */
+.side-panel { display: flex; flex-direction: column; min-height: 0; }
+.side-panel.grow { flex: 1 1 0; }
+#panelRank { flex: 0 0 auto; }
+#panelRank .rank-list { max-height: 168px; overflow-y: auto; }
+.side-sub {
+  float: right; font-style: normal; font-size: 0.78em;
+  color: var(--dim); letter-spacing: 0; font-weight: normal;
+}
+/* 聊天频道切换塞进标题行，省一行高度 */
+.chat-tabs.inline {
+  float: right; display: inline-flex; gap: 3px;
+  margin: 0; border: none; padding: 0;
+}
+.chat-tabs.inline .chtab { flex: 0 0 auto; padding: 1px 8px; letter-spacing: 0; }
+
+/* ============ 黑市弹窗 ============ */
+.mk-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 2px; border-bottom: 1px dotted #262b20;
+}
+.mk-name { flex: 1; font-size: clamp(14px, 0.99vw, 19px); }
+.mk-sub { display: block; font-style: normal; font-size: 0.78em; color: var(--dim); }
+.mk-price { color: var(--accent2); font-size: clamp(14px, 0.99vw, 19px); }
+.mk-price.no { color: var(--bad); }
+.mk-row .btn { flex: 0 0 auto; }
+
+/* ============ 结算战报 ============ */
+.report-box {
+  border: 1px solid var(--line); background: var(--panel2);
+  padding: 12px 14px; margin: 0 auto 6px; max-width: 520px;
+}
+.report-title {
+  font-size: clamp(13px, 0.95vw, 18px); letter-spacing: 4px;
+  color: var(--accent2); text-align: center; margin-bottom: 10px;
+}
+.report-line {
+  margin: 0 0 8px; line-height: 1.85;
+  font-size: clamp(14px, 1.02vw, 20px); color: #cfc9bf;
+}
+.report-sum {
+  margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line);
+  font-size: clamp(13px, 0.92vw, 17px); color: var(--dim); text-align: right;
+}
+
+/* ============ 右栏：公屏(系统) / 信息(个人+聊天) ============ */
+/* 公屏只放系统播报，高度固定；信息面板里个人日志和聊天上下分 */
+#panelSys { flex: 0 0 auto; }
+#panelSys .log-list { max-height: 150px; overflow-y: auto; }
+
+#panelInfo { flex: 1 1 0; }
+.info-log {
+  flex: 0 0 32%; min-height: 60px;
+  overflow-y: auto; padding-bottom: 6px;
+  border-bottom: 1px dashed var(--line);
+}
+.chat-block {
+  flex: 1 1 0; min-height: 0;
+  display: flex; flex-direction: column;
+  padding-top: 6px;
+}
+.chat-block .chat-tabs { margin-bottom: 5px; }
+.chat-block .chat-list { flex: 1 1 0; min-height: 40px; }
+
+/* ============ 悬浮提示 ============ */
+.hint-pop {
+  position: fixed; z-index: 9999; width: 250px;
+  padding: 9px 11px; pointer-events: none;
+  background: #171a13; border: 1px solid var(--accent);
+  color: #e8e3d6; font-size: clamp(12.5px, 0.9vw, 16px); line-height: 1.7;
+  opacity: 0; transition: opacity .12s ease;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.55);
+}
+.hint-pop.show { opacity: 1; }
+
+/* 黑市常驻提示：贴在区域栏，随时能看到它在哪、还剩多久 */
+.market-tag {
+  font-size: clamp(12.6px, 0.904vw, 18px); padding: 2px 7px;
+  background: #2a1414; color: #e07070; border: 1px solid #6a2424;
+  letter-spacing: 1px;
+}
+.market-tag.here {
+  background: #3a1616; color: #ff9a9a; border-color: #a33;
+  animation: blink 1.6s infinite;
+}
+
+/* ============ 右栏改版：两张卡 + 标题内 tab ============ */
+/* 卡一：排名 / 公屏（切换）  卡二：信息 / 区块 / 私聊（切换） */
+.stab {
+  background: none; border: none; color: var(--dim); font-family: inherit;
+  font-size: clamp(14.4px, 1.027vw, 20px); letter-spacing: 2px; padding: 4px 9px;
+  cursor: pointer; border-bottom: 2px solid transparent;
+}
+.stab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.card-title.tabbed .side-sub { float: none; margin-left: auto; }
+
+#panelTop { flex: 0 0 auto; }
+#panelTop .pane { flex: 1 1 0; min-height: 0; }
+#panelTop #rankList, #panelTop #sysList { max-height: 148px; overflow-y: auto; }
+
+#panelInfo { flex: 1 1 0; }
+.info-pane { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+.info-log {
+  flex: 0 0 42%; min-height: 48px; overflow-y: auto;
+  padding-bottom: 6px; margin-bottom: 6px; border-bottom: 1px dashed var(--line);
+}
+.info-log.hidden { display: none; }
+.info-pane .chat-list { flex: 1 1 0; min-height: 40px; overflow-y: auto; }
+
+/* ============ NPC 按钮统一放在地图下方区域栏 ============ */
+/* 以前黑市/佣兵挤在右下角的背包栏里，被压成竖条，看不清 */
+.zone-actions { flex-wrap: wrap; }
+.market-btn { background: #2a1414; color: #e87878; border-color: #6a2424; }
+.market-btn:hover { background: #3a1a1a; color: #ff9a9a; }
+.merc-btn { background: #13202b; color: #7fb6e0; border-color: #24506a; }
+.merc-btn:hover { background: #1a2c3a; color: #a5d0f0; }
+
+/* 卡一的两个面板：固定高度，切 tab 时卡片不跳；flex-basis:0 在内容自适应容器里会塌成 0 */
+#panelTop .pane { flex: 0 0 auto; height: 150px; }
+#panelTop #rankList,
+#panelTop #sysList { height: 100%; max-height: none; overflow-y: auto; }
+
+/* 地图悬浮窗里的黑市/佣兵提示：强提醒，一眼能看到 */
+.map-tip .mt-market {
+  margin-top: 4px; padding-top: 4px;
+  border-top: 1px dashed rgba(224,80,80,0.45);
+  color: #ff6b6b; font-weight: bold; letter-spacing: 1px;
+  text-shadow: 0 0 8px rgba(255,70,70,0.75);
+  animation: blink 1.4s infinite;
+}
+.map-tip .mt-merc {
+  margin-top: 4px; padding-top: 4px;
+  border-top: 1px dashed rgba(120,180,224,0.45);
+  color: #7fb6e0; font-weight: bold; letter-spacing: 1px;
+  text-shadow: 0 0 8px rgba(90,160,220,0.65);
+}
+
+/* 悬浮窗可能有多行，别让它顶出地图 */
+.map-tip { max-width: 340px; white-space: normal; line-height: 1.5; }
+
+/* ============ 区域栏重排 ============ */
+/* 原来「区域+名字+商人+空投+黑市+危险」全挤一行，有商店的区块直接糊成一团。
+   现在：左边区域+名字，右边状态标签自动换行，危险提示去掉（地图悬浮窗里还有）。 */
+.zone-head {
+  display: flex; align-items: center; gap: 12px;
+  flex-wrap: wrap;
+}
+.zh-left { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+.zh-tags {
+  display: flex; align-items: center; gap: 6px;
+  flex: 1 1 auto; flex-wrap: wrap; min-width: 0;
+}

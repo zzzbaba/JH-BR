@@ -57,19 +57,22 @@ section "5. 鉴权生效"
 [ "$(code "$BASE/api/state")" = "401" ] && ok "未登录访问 /api/state 被拒（401）" || no "/api/state 未鉴权就能访问"
 
 section "6. 数据目录"
-if [ -f store/admin.json ]; then
-  ok "store/admin.json 存在（说明容器能写入挂载的 volume）"
-  PW=$(grep -o '"password"[[:space:]]*:[[:space:]]*"[^"]*"' store/admin.json | sed 's/.*"\([^"]*\)"$/\1/' || true)
+# 数据在 docker 卷里，通过容器读；原生运行时退回读 ./store
+if command -v docker >/dev/null 2>&1 && docker inspect jianghan-br >/dev/null 2>&1; then
+  ADMIN_JSON=$(docker exec jianghan-br cat /app/store/admin.json 2>/dev/null || true)
+  SAVE_N=$(docker exec jianghan-br sh -c 'ls /app/store/saves 2>/dev/null | wc -l' 2>/dev/null | tr -d ' ')
+else
+  ADMIN_JSON=$(cat store/admin.json 2>/dev/null || true)
+  SAVE_N=$(find store/saves -name '*.json' 2>/dev/null | wc -l | tr -d ' ')
+fi
+if [ -n "${ADMIN_JSON:-}" ]; then
+  ok "store/admin.json 存在（容器能写入数据卷）"
+  PW=$(printf '%s' "$ADMIN_JSON" | grep -o '"password"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' || true)
   [ -n "${PW:-}" ] && printf '     后台密码 %s\n' "$PW"
 else
-  no "store/admin.json 不存在 —— volume 可能没挂上，或容器没权限写"
+  no "store/admin.json 不存在 —— 数据卷可能没挂上，或容器没权限写"
 fi
-if [ -d store/saves ]; then
-  n=$(find store/saves -name '*.json' 2>/dev/null | wc -l | tr -d ' ')
-  ok "store/saves 可读（$n 份存档）"
-else
-  no "store/saves 不存在"
-fi
+ok "store/saves 可读（${SAVE_N:-0} 份存档）"
 
 section "7. 容器状态"
 if command -v docker >/dev/null 2>&1; then
