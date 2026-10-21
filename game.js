@@ -889,8 +889,7 @@ function finishBattle(c, victory) {
   c.kills++;
   c.stats.kills++;
   if (c.stats.kills === 1) {
-    const w0 = weaponOf(c);
-    keyEvent(c, 'firstkill', `第 ${c.turn || 0} 回合，你用${w0 ? w0.name : '赤手空拳'}放倒了一个${e.name}。`);
+    keyEvent(c, 'firstkill', `第 ${c.turn || 0} 回合，你和${e.name}撞上，最后站着的是你。`);
   }
   c.merc = null;   // 雇佣兵只打一场
   if (p.lastFist) c.stats.fistKills++;   // 赤手空拳打死人（成就用）

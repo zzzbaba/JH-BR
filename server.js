@@ -235,7 +235,7 @@ function applyPvp(attacker, res) {
       t.alive = false;
       t.scene = 'dead';
       t.pending = { reason: 'hp' };
-      W.pushChat({ ch: 'public', from: '系统', text: `${attacker.name} 在${zone}放倒了 ${t.name}。`, kind: 'death' });
+      W.pushChat({ ch: 'public', from: '系统', text: `${attacker.name} 在${zone}赢了 ${t.name}。`, kind: 'death' });
     } else {
       W.pushChat({ ch: 'public', from: '系统', text: `${attacker.name} 在${zone}袭击了 ${t.name}。`, kind: 'sys' });
     }
