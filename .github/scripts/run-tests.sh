@@ -21,6 +21,31 @@ mkdir -p store/saves store/_trash
 printf '{"password":"jianghan","createdAt":%s}' "$(date +%s)000" > store/admin.json
 echo "预置后台密码：$(cat store/admin.json)"
 
+# 2026-10-23 项目瘦身，九套测试脚本已从工作区移除（还在 git 历史里）。
+# 这里把它们从「最后一次删除它们的那个提交」的父提交恢复出来再跑，
+# 这样仓库可以保持精简，CI 仍然有回归能力。需要 checkout 时 fetch-depth: 0。
+SUITES="test.js test2.js test3.js test4.js api-test2.js api-test3.js api-test4.js pvp-test.js"
+NEED_RESTORE=0
+for t in $SUITES; do
+  [ -f "$t" ] || NEED_RESTORE=1
+done
+
+if [ "$NEED_RESTORE" = "1" ]; then
+  LAST_DEL=$(git log --diff-filter=D --format=%H -1 -- test.js 2>/dev/null || true)
+  if [ -n "$LAST_DEL" ]; then
+    echo "测试脚本不在工作区，从 $LAST_DEL 的父提交恢复"
+    if git checkout "$LAST_DEL^" -- $SUITES 2>/dev/null; then
+      echo "恢复成功：$(echo $SUITES | wc -w) 个脚本"
+    else
+      echo "::error::测试脚本恢复失败（可能是浅克隆，检查 fetch-depth）"
+      exit 1
+    fi
+  else
+    echo "::error::找不到测试脚本，也找不到删除记录"
+    exit 1
+  fi
+fi
+
 run_suite() {
   local t="$1"
   echo "::group::$t"

@@ -26,6 +26,10 @@ jobs:
     steps:
       - name: 拉取代码
         uses: actions/checkout@v4
+        with:
+          # 测试脚本已从工作区移除，run-tests.sh 要从 git 历史里恢复它们，
+          # 浅克隆（默认 depth 1）拿不到历史，所以必须全量拉取。
+          fetch-depth: 0
 
       - name: 安装 Node 22
         uses: actions/setup-node@v4
