@@ -10,55 +10,69 @@
 <body>
 
 <!-- ============ 登录 ============ -->
-<div id="loginScreen" class="screen">
-  <div class="login-box">
-    <div class="logo">
-      <div class="logo-mark">
-        <svg viewBox="0 0 48 48" width="56" height="56" shape-rendering="crispEdges">
-          <rect x="0" y="0" width="48" height="48" fill="#120d0d"/>
-          <rect x="1" y="1" width="46" height="46" fill="none" stroke="#c8453a" stroke-width="2"/>
-          <polygon points="24,10 19,33 29,33" fill="none" stroke="#c8453a" stroke-width="2"/>
-          <rect x="20" y="20" width="8" height="2" fill="#7d2620"/>
-          <rect x="19" y="26" width="10" height="2" fill="#7d2620"/>
-          <rect x="13" y="33" width="22" height="3" fill="#c8453a"/>
-          <rect x="23" y="6" width="2" height="4" fill="#ef7264"/>
-          <rect x="7" y="39" width="34" height="2" fill="#7d2620"/>
-        </svg>
+<!-- ============ 大厅：登录 + 看板 + 成就榜 + 开局状态 ============ -->
+<div id="lobbyScreen" class="screen hidden">
+  <div class="lobby">
+    <header class="lobby-head">
+      <div class="lh-brand">江汉<span class="br">BR</span><i>BATTLE ROYALE</i></div>
+      <div class="lh-status">
+        <b id="lobbyState">—</b>
+        <span id="lobbyTimer" class="lh-timer"></span>
       </div>
-      <div class="logo-text">
-        <div class="logo-line1">江汉<span class="br">BR</span></div>
-        <div class="logo-line2">BATTLE ROYALE</div>
+    </header>
+    <div id="lobbyBanner" class="lobby-banner hidden"></div>
+
+    <footer class="lobby-foot">
+      <!-- 未登录：账号密码 -->
+      <div id="lobbyLogin" class="lobby-login hidden">
+        <div class="ll-head">
+          <div class="ll-tabs">
+            <button class="tab active" data-tab="login">登录</button>
+            <button class="tab" data-tab="register">注册</button>
+          </div>
+          <span class="ll-tip">新玩家注册后直接进入当前对局</span>
+        </div>
+        <div class="ll-row">
+          <input id="inUser" type="text" maxlength="16" autocomplete="username" placeholder="账号 2-16 位">
+          <input id="inPass" type="password" maxlength="32" autocomplete="current-password" placeholder="密码">
+          <button id="btnAuth" class="btn primary">进入游戏</button>
+        </div>
+        <div id="authMsg" class="msg"></div>
       </div>
-    </div>
-    <div class="logo-sub">64 区块 · 一个出口</div>
 
-    <div class="tabs">
-      <button class="tab active" data-tab="login">登录</button>
-      <button class="tab" data-tab="register">注册</button>
-    </div>
+      <!-- 已登录：你的状态 + 上一轮战报 -->
+      <div id="lobbyMe" class="lobby-me hidden">
+        <div class="lm-head">
+          <span class="lm-user" id="lmUser"></span>
+          <span class="lm-hint" id="lmHint"></span>
+          <div class="lm-actions" id="lmActions"></div>
+        </div>
+        <div class="lm-stats" id="lmStats"></div>
+        <div class="lm-recent" id="lmRecent"></div>
+        <div id="lmReport" class="lm-report"></div>
+      </div>
+    </footer>
 
-    <div class="form">
-      <label>账号</label>
-      <input id="inUser" type="text" maxlength="16" autocomplete="username" placeholder="2-16 位">
-      <label>密码</label>
-      <input id="inPass" type="password" maxlength="32" autocomplete="current-password" placeholder="至少 4 位">
-      <button id="btnAuth" class="btn primary big">进入油田</button>
-      <div id="authMsg" class="msg"></div>
-    </div>
+    <main class="lobby-main">
+      <section class="lobby-card">
+        <div class="card-title">看板 <em class="side-sub" id="boardSub">历史轮次</em></div>
+        <div id="lobbyBoard" class="board-list"></div>
+      </section>
+      <section class="lobby-card lobby-ach-card">
+        <div class="card-title">称号图鉴 <em class="side-sub" id="achSub">—</em></div>
+        <div id="lobbyAch" class="ach-list"></div>
+      </section>
+      <section class="lobby-card lobby-help">
+        <div class="card-title">怎么玩 <em class="side-sub">第一次来先看这个</em></div>
+        <div class="help-grid">
+          <div class="hcell"><b>64 个区块</b><span>从十号地出发，走到哪算哪。每个区块物资和危险度都不一样。</span></div>
+          <div class="hcell"><b>探索 · 捡东西</b><span>翻箱子、遇人、打起来。枪、药、材料全靠捡，背包只有 32 格。</span></div>
+          <div class="hcell"><b>合成 · 造装备</b><span>绷带→止血带→急救包；材料能造防具和弹药，智力够才做得出来。</span></div>
+          <div class="hcell"><b>活到最后</b><span>钟楼上的广播员一直在念编号。杀掉他，或者带着七娃离开油田。</span></div>
+        </div>
+      </section>
+    </main>
 
-    <div class="login-foot">
-      数据保存在本地 store/ 目录，纯文件存储，方便调试。
-    </div>
-  </div>
-</div>
-
-<!-- ============ 等待开局 / 轮次结束 ============ -->
-<div id="waitScreen" class="screen hidden">
-  <div class="wait-box">
-    <div class="wait-title" id="waitTitle">等待开局</div>
-    <div class="wait-sub" id="waitSub"></div>
-    <div class="wait-body" id="waitBody"></div>
-    <div class="wait-actions" id="waitActions"></div>
   </div>
 </div>
 

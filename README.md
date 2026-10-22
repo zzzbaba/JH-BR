@@ -526,7 +526,14 @@ public/                前端（index.html / app.js / pixel.js / style.css / adm
 
 ## 自检
 
-九套，全绿才算改完。
+**测试脚本已从仓库工作目录移除**（只保留运行必需的文件）。需要时从 git 恢复：
+
+```bash
+git checkout HEAD -- test.js test2.js test3.js test4.js \
+  api-test2.js api-test3.js api-test4.js pvp-test.js ui-test.js
+```
+
+恢复后能跑的九套：
 
 ```bash
 node test.js       # 数据完整性 + 20 局平衡模拟
@@ -539,6 +546,8 @@ node api-test4.js  # NPC 接口 / 改装接口 / CSV 导出
 node pvp-test.js   # 同区块遭遇 / 真人对战
 node ui-test.js    # 界面状态机（需服务器在跑 + playwright-core）
 ```
+
+线上自检（不用恢复测试）：`./smoke-test.sh`（10 项，见 `README-DEPLOY.md`）。
 
 ## 还没做的
 

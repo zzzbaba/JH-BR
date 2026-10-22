@@ -1937,3 +1937,288 @@ img.px-art, img.px-item { image-rendering: pixelated; -ms-interpolation-mode: ne
   display: flex; align-items: center; gap: 6px;
   flex: 1 1 auto; flex-wrap: wrap; min-width: 0;
 }
+
+/* ============ 大厅：登录 + 看板 + 成就榜 ============ */
+/* 以前没开局时是个只能点「刷新」的死界面，新玩家不知道能干嘛。
+   现在整页就是大厅：顶栏看状态和倒计时，中间看板 + 成就榜，底部登录或进局。 */
+#lobbyScreen {
+  display: flex;
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(200,69,58,0.10), transparent 58%),
+    radial-gradient(ellipse at 50% 100%, rgba(90,110,60,0.10), transparent 60%),
+    var(--bg);
+  overflow-y: auto;
+}
+
+.lobby {
+  width: 100%; max-width: 1180px; margin: 0 auto;
+  padding: 18px 20px 26px;
+  display: flex; flex-direction: column; gap: 12px;
+  min-height: 100%;
+}
+
+/* 顶栏 */
+.lobby-head {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  padding-bottom: 10px; border-bottom: 2px solid var(--line);
+}
+.lh-brand {
+  font-size: clamp(20px, 1.43vw, 28px); font-weight: bold; letter-spacing: 2px;
+  color: var(--text); white-space: nowrap;
+}
+.lh-brand .br { color: var(--accent); }
+.lh-brand i {
+  font-style: normal; font-size: 11px; letter-spacing: 3px;
+  color: var(--dim); margin-left: 8px; vertical-align: middle;
+}
+.lh-status { flex: 1; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.lh-status b { font-size: clamp(15px, 1.07vw, 21px); letter-spacing: 1px; color: var(--dim); font-weight: normal; }
+.lh-status b.lh-live { color: var(--good); }
+.lh-status b.lh-over { color: var(--bad); }
+.lh-timer { font-size: clamp(13.8px, 0.99vw, 19px); color: var(--accent2); letter-spacing: 1px; }
+.lh-user { font-size: clamp(13.8px, 0.99vw, 19px); color: var(--accent); letter-spacing: 1px; }
+
+/* 中间两栏 */
+.lobby-main {
+  flex: 1 1 auto; min-height: 0;
+  display: grid; grid-template-columns: 1.55fr 1fr; gap: 12px;
+  align-items: stretch;
+}
+.lobby-card {
+  background: var(--panel); border: 2px solid var(--line);
+  padding: 10px 12px; display: flex; flex-direction: column; min-height: 0;
+}
+.lobby-card .card-title { margin-bottom: 8px; }
+
+/* 看板 */
+.board-list { flex: 1 1 0; min-height: 120px; max-height: 46vh; overflow-y: auto; }
+.brow {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 4px; border-bottom: 1px dotted #262b20;
+  font-size: clamp(13.8px, 0.99vw, 19px);
+}
+.brow:hover { background: rgba(255,255,255,0.025); }
+.br-l { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
+.br-id { color: var(--accent); letter-spacing: 1px; }
+.br-reason { color: var(--dim); font-size: 0.86em; }
+.br-top { flex: 1 1 auto; display: flex; gap: 12px; flex-wrap: wrap; min-width: 0; }
+.br-top i { font-style: normal; color: var(--text); white-space: nowrap; }
+.br-top i em { color: var(--accent2); font-style: normal; margin-right: 2px; }
+.br-top i b { color: var(--accent2); font-weight: normal; }
+.br-r { flex: 0 0 auto; color: var(--dim); font-size: 0.86em; }
+
+/* 成就榜 */
+.ach-list { flex: 1 1 0; min-height: 120px; max-height: 46vh; overflow-y: auto; }
+.arow {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  padding: 5px 4px; border-bottom: 1px dotted #262b20;
+  font-size: clamp(13.1px, 0.94vw, 18px);
+}
+.ar-round { color: var(--dim); font-size: 0.85em; flex: 0 0 auto; }
+.ar-name { color: var(--text); flex: 0 0 auto; }
+.ar-titles { display: flex; gap: 4px; flex-wrap: wrap; }
+.ar-titles em {
+  font-style: normal; font-size: 0.88em; padding: 0 5px;
+  background: #2a2416; color: var(--accent2); border: 1px solid #4a3f22;
+}
+
+/* 底部：登录 or 我的状态 */
+.lobby-foot {
+  background: var(--panel); border: 2px solid var(--line); padding: 12px 14px;
+}
+.lobby-login .ll-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
+.ll-tabs { display: flex; gap: 4px; }
+.ll-tabs .tab { flex: 0 0 auto; padding: 5px 16px; font-size: clamp(14.4px, 1.03vw, 20px); }
+.ll-tip { font-size: clamp(12.6px, 0.9vw, 17px); color: var(--dim); }
+.ll-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.ll-row input {
+  flex: 1 1 150px; min-width: 130px; background: #0a0c07; border: 1px solid var(--line);
+  color: var(--text); font-family: inherit; font-size: clamp(15px, 1.07vw, 21px);
+  padding: 8px 10px; outline: none;
+}
+.ll-row input:focus { border-color: var(--accent); }
+.ll-row .btn { flex: 0 0 auto; }
+.lobby-login .msg { font-size: clamp(13.1px, 0.94vw, 18px); color: var(--bad); margin-top: 6px; min-height: 1em; }
+
+.lobby-me .lm-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.lm-user { font-size: clamp(15px, 1.07vw, 21px); color: var(--accent); letter-spacing: 1px; }
+.lm-hint { flex: 1; font-size: clamp(13.1px, 0.94vw, 18px); color: var(--dim); }
+.lm-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.lm-report { margin-top: 10px; }
+.lm-report .report-box { max-width: none; margin: 0; }
+
+@media (max-width: 900px) {
+  .lobby-main { grid-template-columns: 1fr; }
+  .board-list, .ach-list { max-height: 30vh; }
+}
+
+/* 成就榜：本轮实时的用亮色，历史轮次暗一点 */
+.arow.live .ar-round b {
+  font-weight: normal; color: var(--good); margin-left: 4px;
+  font-size: 0.9em; letter-spacing: 1px;
+}
+
+/* 大厅：卡片按内容高度，别被拉伸出一大片空白 */
+.lobby-main { flex: 0 0 auto; align-items: start; }
+.ar-titles em.cnt { background: #1f1f1a; color: var(--dim); border-color: #333; }
+
+/* 大厅底部「怎么玩」：新玩家第一眼要知道这游戏在干嘛 */
+.lobby-help { grid-column: 1 / -1; }
+.help-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.hcell { background: #0c0e08; border: 1px solid var(--line); padding: 9px 11px; }
+.hcell b { display: block; color: var(--accent2); font-size: clamp(14.4px, 1.03vw, 20px); letter-spacing: 1px; margin-bottom: 4px; }
+.hcell span { display: block; color: var(--dim); font-size: clamp(12.6px, 0.9vw, 17px); line-height: 1.65; }
+
+/* ============ 大厅微调（第 46 轮续） ============ */
+/* 两个榜单框加高，往下多长一截 */
+.board-list, .ach-list { min-height: 300px; max-height: 56vh; }
+
+/* 看板左侧：轮次+原因在上，时间在下 */
+.br-l { flex-direction: column; align-items: flex-start; gap: 2px; }
+.br-head { display: flex; align-items: center; gap: 8px; }
+.br-time { color: var(--dim); font-size: 0.78em; letter-spacing: 0.5px; white-space: nowrap; }
+
+/* 成就榜的称号可以悬浮看详情 */
+.ar-titles em { cursor: help; }
+.ar-titles em:hover { background: #3a3220; border-color: var(--accent2); }
+
+/* 切换账号：低调一点，别和主按钮抢 */
+.btn.lm-switch { background: none; border-color: var(--line); color: var(--dim); }
+.btn.lm-switch:hover { color: var(--bad); border-color: var(--bad); }
+
+/* ============ 大厅看板重排（第三版） ============ */
+/* 一行拆成「轮次信息」+「前三名」两段：时间/人数靠右，不再挤在窄左边栏里 */
+.board-list, .ach-list { min-height: 360px; max-height: 60vh; }
+
+.brow {
+  display: flex; flex-direction: column; align-items: stretch; gap: 6px;
+  padding: 9px 6px; border-bottom: 1px dotted #262b20;
+}
+.br-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.br-id { color: var(--accent); font-size: 1.08em; letter-spacing: 1px; }
+.br-reason { color: var(--text); }
+.br-meta {
+  margin-left: auto; display: flex; align-items: baseline; gap: 14px;
+  color: var(--dim); font-size: 0.8em; white-space: nowrap;
+}
+.br-meta .br-time { font-size: 1em; color: var(--dim); }
+
+/* 前三名：名次方块徽章 + 名字 + 分数（明确写「分」） */
+.br-top { display: flex; gap: 18px; flex-wrap: wrap; flex: 0 0 auto; }
+.tk { display: inline-flex; align-items: center; gap: 5px; }
+.tk .rk {
+  font-style: normal; width: 17px; height: 17px; line-height: 15px;
+  text-align: center; font-size: 0.78em; background: #22241c;
+  color: var(--dim); border: 1px solid #3a3f30;
+}
+.tk .rk.r1 { background: #3a2f12; color: #f0c04a; border-color: #7a6020; }
+.tk .rk.r2 { background: #2a2c2e; color: #c0c8cc; border-color: #4a5256; }
+.tk .rk.r3 { background: #2e2419; color: #c08a52; border-color: #5c452c; }
+.tk .nm { color: var(--text); }
+.tk b { color: var(--accent2); font-weight: normal; }
+.tk i { font-style: normal; color: var(--dim); font-size: 0.82em; margin-left: -2px; }
+
+/* ============ 称号图鉴 ============ */
+/* 悬浮窗要能换行：称号说明是多行的（名字 / 分类+稀有度 / 描述 / 条件） */
+.hint-pop { white-space: pre-line; }
+
+.ach-cat {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin: 9px 0 4px; padding-bottom: 3px; border-bottom: 1px solid var(--line);
+  color: var(--accent2); font-size: 0.86em; letter-spacing: 1px;
+}
+.ach-cat:first-child { margin-top: 2px; }
+.ach-cat em { font-style: normal; color: var(--dim); font-size: 0.9em; letter-spacing: 0; }
+
+.ach-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px 10px; }
+.achrow {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 4px;
+  padding: 2px 3px; font-size: clamp(11.8px, 0.84vw, 15px);
+  color: #55584c;                       /* 未解锁：压暗 */
+}
+.achrow.got { color: var(--text); }     /* 已解锁：正常亮度 */
+.achrow:hover { background: rgba(255,255,255,0.04); }
+.achrow .an { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.achrow .as { color: #41443a; font-size: 0.8em; letter-spacing: -1px; flex: 0 0 auto; }
+.achrow.got .as { color: var(--accent2); }
+
+/* ============ 看板：胜负判定徽章 ============ */
+.br-head { align-items: center; }
+.vd {
+  display: inline-block; min-width: 42px; text-align: center;
+  padding: 1px 6px; font-size: 0.78em; letter-spacing: 1px;
+  border: 1px solid; cursor: help; flex: 0 0 auto;
+}
+.vd-win  { background: #17240f; color: #9bd06a; border-color: #3f6b28; }
+.vd-lose { background: #2a1414; color: #e87878; border-color: #6a2424; }
+.vd-time { background: #2a2416; color: #e0c060; border-color: #5c4a20; }
+.vd-void { background: #1e1f1a; color: #8a8d80; border-color: #3a3d33; }
+
+/* 账号栏移到顶栏下方：作为「进入游戏」的第一步，视觉上要比内容区更靠前 */
+.lobby-foot { margin-top: -2px; }
+
+/* 提示条只是通知，绝不能吃鼠标事件 —— 否则它盖住的地图格子/按钮点不动 */
+.toast { pointer-events: none; }
+
+/* ============ 大厅：看板展开 / 结束横幅 / 个人战绩 ============ */
+/* 看板行可点开看全部参赛者 */
+.brow { cursor: pointer; }
+.bd-tip {
+  display: block; margin-top: 3px; font-size: 0.76em; color: #5c6152; letter-spacing: 1px;
+}
+.brow.open .bd-tip { display: none; }
+.br-detail { display: none; margin-top: 4px; padding: 6px 8px; background: #0b0d07; border-left: 2px solid var(--line); }
+.brow.open .br-detail { display: block; }
+.bd-row {
+  display: flex; align-items: baseline; gap: 7px; padding: 2px 0;
+  font-size: clamp(12.6px, 0.9vw, 17px);
+}
+.bd-rk {
+  font-style: normal; width: 16px; height: 16px; line-height: 14px; text-align: center;
+  font-size: 0.8em; background: #22241c; color: var(--dim); border: 1px solid #3a3f30; flex: 0 0 auto;
+}
+.bd-rk.bd1 { background: #3a2f12; color: #f0c04a; border-color: #7a6020; }
+.bd-nm { color: var(--text); flex: 0 0 auto; }
+.bd-sc { color: var(--accent2); font-weight: normal; }
+.bd-unit { font-style: normal; color: var(--dim); font-size: 0.82em; margin-left: -4px; }
+.bd-meta { color: var(--dim); font-size: 0.86em; margin-left: auto; }
+
+/* 轮次结束横幅 */
+.lobby-banner {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 9px 14px; border: 2px solid; font-size: clamp(13.8px, 0.99vw, 19px);
+  animation: bannerIn .3s ease-out;
+}
+@keyframes bannerIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+.lobby-banner b { letter-spacing: 1px; }
+.lobby-banner .lb-vd { font-weight: bold; letter-spacing: 2px; }
+.lobby-banner .lb-why, .lobby-banner .lb-champ { color: var(--dim); font-size: 0.9em; }
+.lobby-banner .lb-next { margin-left: auto; font-size: 0.9em; }
+.lb-win  { border-color: #3f6b28; background: #131c0c; color: #9bd06a; }
+.lb-lose { border-color: #6a2424; background: #1e0f0f; color: #e87878; }
+.lb-time { border-color: #5c4a20; background: #1c180c; color: #e0c060; }
+.lb-void { border-color: #3a3d33; background: #14150f; color: #8a8d80; }
+
+/* 个人战绩 */
+.lm-stats {
+  margin-top: 8px; padding-top: 8px; border-top: 1px dashed #262b20;
+  font-size: clamp(13.1px, 0.94vw, 18px); color: var(--accent2); letter-spacing: 0.5px;
+}
+.lm-recent { margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: clamp(12.6px, 0.9vw, 17px); }
+.lm-recent em { font-style: normal; color: var(--dim); }
+.lm-recent .rc { padding: 1px 7px; border: 1px solid; }
+.rc-win  { color: #9bd06a; border-color: #3f6b28; background: #17240f; }
+.rc-lose { color: #e87878; border-color: #6a2424; background: #2a1414; }
+.rc-time { color: #e0c060; border-color: #5c4a20; background: #2a2416; }
+.rc-void { color: #8a8d80; border-color: #3a3d33; background: #1e1f1a; }
+
+/* 图鉴点开的详情 */
+.title-detail .td-sub { color: var(--dim); font-size: 0.9em; letter-spacing: 1px; }
+.title-detail .td-star { color: var(--accent2); letter-spacing: 0; }
+.title-detail .td-desc { margin: 10px 0 6px; line-height: 1.8; }
+.title-detail .td-cond { color: var(--dim); font-size: 0.92em; }
+.title-detail .td-owners { margin-top: 12px; display: flex; gap: 6px; flex-wrap: wrap; }
+.title-detail .td-owners span {
+  padding: 2px 8px; background: #2a2416; color: var(--accent2); border: 1px solid #4a3f22;
+}
+.achrow { cursor: pointer; }

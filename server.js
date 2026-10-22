@@ -14,7 +14,7 @@ let shuttingDown = false;
 const MAPD = require('./data/map');
 const ITEMD = require('./data/items');
 const { RECIPES } = require('./data/recipes');
-const { ACHIEVEMENTS, CAT_ORDER: ACH_CATS } = require('./data/achievements');
+const { ACHIEVEMENTS, BY_ID: ACH_BY_ID, CAT_ORDER: ACH_CATS } = require('./data/achievements');
 const SHOP = require('./data/shop');
 const NPCD = require('./data/npcs');
 const { FINAL_BOSS } = require('./data/boss');
@@ -855,13 +855,45 @@ W.onEnd((round, reason) => {
       boss: !!(s.char.stats && s.char.stats.bossKills),
       gold: s.char.gold || 0,
       titles: Object.keys(s.char.achievements || {}).length,
+      // 大厅的成就榜要显示具体称号名，用 roundTitles（本轮拿到的），不用跨轮累计的 achievements
+      titleNames: Object.keys(s.char.roundTitles || {})
+        .map(id => (ACH_BY_ID[id] || {}).title || id).slice(0, 10),
       score: sc.total,
     };
   }).sort((a, b) => (b.score - a.score) || (b.kills - a.kills) || (b.turn - a.turn));
 
+  // 跨轮统计：每轮结束时累加到 users.json 的 career。
+  // 以前 career 只有一个 sevenWa，所以「累计击杀 / 总场次 / 最好成绩」这类数据根本没有源。
+  try {
+    const db = loadUsers();
+    let touched = false;
+    for (const p of ranked) {
+      const u = db.users[p.username];
+      if (!u) continue;
+      const car = u.career || (u.career = {});
+      car.rounds = (car.rounds || 0) + 1;
+      car.kills = (car.kills || 0) + (p.kills || 0);
+      car.turns = (car.turns || 0) + (p.turn || 0);
+      car.gold = (car.gold || 0) + (p.gold || 0);
+      car.titles = (car.titles || 0) + ((p.titleNames || []).length);
+      if ((p.score || 0) > (car.bestScore || 0)) {
+        car.bestScore = p.score || 0;
+        car.bestRound = round.id;
+      }
+      // 胜利 = 亲手杀了广播员，或者带着七娃逃出去
+      const w = round.winner && round.winner.username;
+      if (w === p.username && (reason === 'boss' || reason === 'sevenwa')) {
+        car.wins = (car.wins || 0) + 1;
+      }
+      touched = true;
+    }
+    if (touched) saveUsers(db);
+  } catch (e) { console.error('[career]', e); }
+
   rlog('sys', '轮次', `第 ${round.id} 轮结束（${reason}）· ${ranked.length} 人参与 · 冠军 ${ranked[0] ? ranked[0].name + ' ' + ranked[0].score + '分' : '无'}`);
   W.pushHistory({
     roundId: round.id,
+    startedAt: round.startedAt || null,
     endedAt: Date.now(),
     reason,
     winner: round.winner ? round.winner.username : (ranked[0] ? ranked[0].username : null),
@@ -948,7 +980,20 @@ function runGm(user, char, raw) {
 function statePayload(user, isGM) {
   const s = loadSave(user);
   const round = roundInfo();
-  if (!s || !s.char) return { ok: true, hasSave: false, round, isGM };
+  if (!s || !s.char) {
+    const me0 = (loadUsers().users[user] || {});
+    return {
+      ok: true, hasSave: false, dead: false, round, isGM,
+      career: me0.career || {},
+      recent: (W.get().history || [])
+        .filter(h => (h.top || []).some(x => x.username === user)).slice(0, 5)
+        .map(h => {
+          const idx = (h.top || []).findIndex(x => x.username === user);
+          const p = h.top[idx] || {};
+          return { roundId: h.roundId, reason: h.reason, rank: idx + 1, score: p.score || 0, players: (h.top || []).length };
+        }),
+    };
+  }
   const c = G.migrateChar(s.char);
   // 轮次过期：上一轮的角色不能继续用
   const stale = c.roundId !== round.id;
@@ -960,10 +1005,26 @@ function statePayload(user, isGM) {
   const terminal = c.scene === 'sevenwin';
   const usable = !stale && !settled && (!roundOver || terminal);
   const out = {
-    ok: true, hasSave: usable, stale, settled, state: usable ? G.snapshot(c) : null,
+    ok: true, hasSave: usable, stale, settled,
+    // 轻量轮询不带 state，客户端要靠这个判断「你出局了」
+    dead: (c.alive === false || c.scene === 'dead' || c.scene === 'settled'),
+    state: usable ? G.snapshot(c) : null,
     round, roundOver, username: user, isGM,
     oldRound: stale ? c.roundId : null,
   };
+  // 个人跨轮战绩：career 是每轮结束时累加的；recent 从历史里反查最近上过榜的几轮
+  try {
+    const me = loadUsers().users[user] || {};
+    out.career = me.career || {};
+    out.recent = (W.get().history || [])
+      .filter(h => (h.top || []).some(x => x.username === user))
+      .slice(0, 5)
+      .map(h => {
+        const idx = (h.top || []).findIndex(x => x.username === user);
+        const p = h.top[idx] || {};
+        return { roundId: h.roundId, reason: h.reason, rank: idx + 1, score: p.score || 0, players: (h.top || []).length };
+      });
+  } catch (e) { out.career = {}; out.recent = []; }
   // 结算页战报：轮次结束时给，哪怕角色已经不能继续操作
   if (roundOver && !stale) {
     out.report = G.battleReport(c);
@@ -997,6 +1058,103 @@ async function handleReq(req, res) {
   // ===== 健康检查（公开、零 IO、不泄露玩家信息）=====
   // 容器探针和外部监控（uptime robot / 自建巡检）都用这个，
   // 别拿首页当探针：首页要走静态资源逻辑，还带 gzip。
+  // 大厅数据：**不需要登录**。新玩家进来先看到"这游戏在干嘛、上一轮谁赢了、现在能不能进"，
+  // 而不是一个只能点刷新的死界面。
+  if (route === '/api/lobby') {
+    const r = W.round();
+    const now = Date.now();
+    const lite = qs.get('lite') === '1';
+    const online = listSaves().filter(s => s.char && s.char.roundId === r.id
+      && s.char.alive !== false && s.char.scene !== 'dead' && !s.char.bot).length;
+    const roundOut = {
+      id: r.id, state: r.state, endReason: r.endReason, endedAt: r.endedAt || null,
+      startedAt: r.startedAt, endsAt: r.endsAt, nextStartAt: r.nextStartAt,
+      leftMs: Math.max(0, (r.endsAt || 0) - now),
+      nextInMs: r.nextStartAt ? Math.max(0, r.nextStartAt - now) : 0,
+      winner: r.winner ? r.winner.username : null,
+    };
+    // 轻量轮询：客户端每 3 秒只要这几个字段。称号图鉴 4.5KB 是静态的，重复发纯浪费。
+    if (lite) return json(res, 200, { ok: true, now, round: roundOut, online });
+    const w = W.get();
+    // 自动开轮会产出大量「0 人」的空轮次，看板上全是噪音，直接过滤
+    const hist = (w.history || []).filter(h => (h.top || []).length > 0).slice(0, 12);
+    // 成就榜：当前轮实时 + 历史轮次。
+    // 历史轮次只有本轮结束时写进去的 titleNames；老数据没这个字段，所以当前轮要单独补，
+    // 否则刚上线那几天榜单是空的。
+    const ach = [];
+    for (const s of listSaves()) {
+      if (!s.char || s.char.roundId !== r.id || s.char.bot) continue;
+      const ids = Object.keys(s.char.roundTitles || {});
+      if (!ids.length) continue;
+      ach.push({
+        roundId: r.id, name: s.char.name, username: s.user, live: true,
+        titles: ids.slice(0, 10).map(id => ({
+          id, n: (ACH_BY_ID[id] || {}).title || id, d: (ACH_BY_ID[id] || {}).desc || '',
+        })),
+      });
+    }
+    // 历史轮次：titleNames 存的是「名字」不是 id，转成同样的 {id,n,d} 结构
+    const nameToAch = {};
+    for (const a of ACHIEVEMENTS) nameToAch[a.title] = a;
+    for (const h of hist.slice(0, 8)) {
+      for (const p of (h.top || [])) {
+        const names = p.titleNames || [];
+        if (names.length) {
+          ach.push({
+            roundId: h.roundId, name: p.name, username: p.username,
+            titles: names.map(t => {
+              const a = nameToAch[t];
+              return a ? { id: a.id, n: a.title, d: a.desc || '' } : { id: '', n: t, d: '' };
+            }),
+          });
+        } else if (p.titles > 0) {
+          // 加 titleNames 之前的历史轮次只有个数，没有名字 —— 别让成就榜整块空着
+          ach.push({ roundId: h.roundId, name: p.name, username: p.username, count: p.titles });
+        }
+      }
+    }
+    // 称号图鉴：53 个称号的全量定义 + 谁解锁过。
+    // **用所有存档的累计 achievements**，不用历史轮次 ——
+    // 历史只存了「个数」，没存名字，靠它统计永远是 0。
+    const titleCount = {};
+    const titleOwners = {};
+    for (const s of listSaves()) {
+      if (!s.char || s.char.bot) continue;
+      for (const id of Object.keys(s.char.achievements || {})) {
+        titleCount[id] = (titleCount[id] || 0) + 1;
+        (titleOwners[id] || (titleOwners[id] = [])).push(s.char.name || s.user);
+      }
+    }
+    const unlockedSet = new Set(Object.keys(titleCount));
+
+    return json(res, 200, {
+      ok: true,
+      now,
+      catalog: ACHIEVEMENTS.map(a => ({ id: a.id, n: a.title, d: a.desc || '', h: a.hint || '', c: a.cat, t: a.tier })),
+      cats: ACH_CATS,
+      unlocked: [...unlockedSet],
+      titleCount,
+      // 每个称号被谁拿到了 —— 图鉴点开要看名单
+      titleOwners,
+      round: roundOut,
+      online,
+      history: hist.map(h => ({
+        roundId: h.roundId,
+        endedAt: h.endedAt,
+        reason: h.reason,
+        winner: h.winner,
+        players: (h.top || []).length,
+        // 历史里存了完整 top（最多 10 人），以前只给前端 5 条，现在全给
+        top: (h.top || []).map(p => ({
+          name: p.name, score: p.score, kills: p.kills, turn: p.turn,
+          alive: p.alive, boss: p.boss, gold: p.gold,
+          titles: (p.titleNames || []).length,
+        })),
+      })),
+      achievements: ach,
+    });
+  }
+
   if (route === '/api/health') {
     const r = W.round();
     const disk = DISK.status();
@@ -1108,7 +1266,10 @@ async function handleReq(req, res) {
 
   // ===== 状态 =====
   if (route === '/api/state') {
-    return json(res, 200, statePayload(user, isGM));
+    const payload = statePayload(user, isGM);
+    // 大厅只要 hasSave / career / recent / report，用不上整份快照（约 3KB）
+    if (qs.get('lobby') === '1') delete payload.state;
+    return json(res, 200, payload);
   }
 
   // ===== 开局 =====
@@ -1674,9 +1835,19 @@ async function handleAdmin(route, req, res, qs) {
   }
 
   if (route === '/api/admin/chat/clear' && req.method === 'POST') {
-    W.get().chat = [];
+    const b = await readBody(req);
+    const w = W.get();
+    // 带 match 时只删匹配的消息（比如发错了一条公告，不用把整屏聊天清空）
+    if (b && b.match) {
+      const key = String(b.match);
+      const before = (w.chat || []).length;
+      w.chat = (w.chat || []).filter(m => !(m.text && m.text.indexOf(key) >= 0));
+      W.save();
+      return json(res, 200, { ok: true, removed: before - w.chat.length, left: w.chat.length });
+    }
+    w.chat = [];
     W.save();
-    return json(res, 200, { ok: true });
+    return json(res, 200, { ok: true, removed: 'all' });
   }
 
   if (route === '/api/admin/playerdetail') {
@@ -2014,7 +2185,7 @@ async function handleAdmin(route, req, res, qs) {
       W.get().market = { zone: zone.id, until: Date.now() + 8 * 60000 };
       W.save();
       W.sys(`【黑市】有人在「${zone.name}」摆了摊，只收现金，只待 8 分钟。`, 'win');
-      W.sys(`【黑市】重复一遍：「${zone.name}」。高级武器三倍价，还能雇人替你打一场。`, 'win');
+      W.sys(`【黑市】重复一遍：「${zone.name}」。高级武器三倍价，地图上有红点。`, 'win');
       rlog('sys', '黑市', `管理员手动开市 → ${zone.name}`);
       return json(res, 200, { ok: true, round: roundInfo(), zone: zone.id, zoneName: zone.name });
     } else if (b.action === 'marketOff') {
@@ -2208,11 +2379,18 @@ function botStep(c) {
   return botMove(c) || G.act(c, 'explore');
 }
 
+// 假人落盘节流：内存里的状态每 tick 都更新（游戏逻辑照常），
+// 但磁盘每 3 个 tick 才写一次 —— 假人本来就是一次性的，崩了重生成就行。
+// 50 个假人一轮落盘 51ms，节流后降到 1/3。
+let botTickN = 0;
+
 function tickBots() {
   if (shuttingDown) return;
   try {
     const r = W.round();
     if (r.state !== 'running') return;
+    botTickN++;
+    const persist = botTickN % 3 === 0;
     for (const s of listSaves()) {
       if (!s.char || !s.char.bot || s.char.roundId !== r.id) continue;
       const c = s.char;
@@ -2227,7 +2405,7 @@ function tickBots() {
         // 死了就别再动了
         if (c.hp <= 0) { c.hp = 0; c.alive = false; c.scene = 'dead'; }
       } catch (e) { /* 单个假人出错不影响其他人 */ }
-      writeSave(s.user, s);
+      if (persist) writeSave(s.user, s);
     }
   } catch (e) { /* ignore */ }
 }

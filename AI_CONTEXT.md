@@ -18,7 +18,7 @@
 你在维护一个已经能跑的项目：江汉BR（项目根目录）。
 先读项目根目录的 AI_CONTEXT.md，那是事实清单，里面的函数名和公式都是核对过的。
 读完先复述：项目由哪几个文件组成、角色对象有哪些字段、战斗伤害怎么算。
-复述正确后再动手。改动前告诉我你要改哪个文件的哪个函数，改完必须跑 §11 的测试（九套游戏 + 三套功能）。
+复述正确后再动手。改动前告诉我你要改哪个文件的哪个函数。测试脚本已移除，改完至少自己起服务点一遍主流程，见 §11。
 不要引入任何 npm 依赖，不要用框架，不要改数据存储方式。
 ```
 
@@ -79,12 +79,13 @@
 | `public/style.css` | 1939 | 全部样式（暗色废土 + 像素硬边框 + 血量三档/受击/状态/天气特效 + 强化/勾选） | 改视觉 |
 | `public/admin.html` | 1277 | 后台（单文件，内嵌 CSS+JS，含单轮控制页、**日志页**） | 改后台 |
 
-**测试文件**：九套 —— `test.js` `test2.js` `test3.js` `test4.js` `api-test2.js` `api-test3.js` `api-test4.js` `pvp-test.js` `ui-test.js`
-另有 `chat-test.js`（聊天冷却/净化）、`feature-test.js`（黑市/佣兵/战报）、`admin-test.js`（27 个后台接口全量体检）
+**测试脚本已从工作目录删除**（2026-10-23 瘦身，见 §11）。九套测试在 git 历史里，需要时 `git checkout` 恢复。
 
-**历史截图脚本已归档到 `dev/legacy/`**（31 个，共 3488 行）—— 都是历次 UI 调试用的一次性验证脚本，
-硬编码了 Windows Chrome 路径，界面改版后跑不起来，**不要试图复用**。
-写新的验证脚本时用 `playwright-core` + 本机 Chrome，见 §11。
+**`shots/` 和 `dev/legacy/` 也删了** —— 197 张历史截图 + 31 个一次性 UI 验证脚本（硬编码 Windows Chrome 路径，
+界面改版后本来也跑不起来）。要写新的验证脚本，用 `playwright-core` + 本机 Chrome，见 §11。
+
+**项目根目录现在只有运行和部署必需的东西**：5 个核心 js + `data/` + `public/` + 6 个部署文件 + 7 个 MD。
+打包产物 30 个文件 / 236 KB。
 
 ---
 
@@ -612,6 +613,20 @@ GM 隐身：GM 不进别人的候选，GM 自己也遇不到别人
 
 ## 8. API 清单
 
+### 公开（**不需要登录**）
+
+```
+GET /api/health          → 健康检查（容器探针/监控用）
+GET /api/lobby           → **大厅数据**：轮次状态 + 倒计时 + 最近 12 轮看板 + 成就榜 + 在场人数
+                           新玩家没登录就能看到「这游戏在干嘛、上一轮谁赢了、现在能不能进」
+                           history[].startedAt/endedAt 是轮次起止；history[].top 是完整参赛名单
+                           achievements[].titles 是 [{id, n: 名称, d: 说明}]（老轮次只有 count）
+                           catalog/unlocked/titleCount/titleOwners 是称号图鉴用的
+                           round.endedAt 用来判断「刚结束」，前端据此挂 90 秒横幅
+                           **?lite=1 只回 { round, online }（194 字节）** —— 客户端每 3 秒轮询用这个；
+                           全量 8063 字节里 4517 是静态的称号图鉴，重复发纯浪费
+```
+
 ### 玩家侧（需 `Authorization: Bearer <token>`）
 
 ```
@@ -619,7 +634,9 @@ POST /api/register        { username, password } → { token, hasSave }
 POST /api/login           { username, password } → { token, isGM }
 POST /api/logout
 GET  /api/meta            → 静态数据（地图/物品/配方/成就/商人/状态/特殊角色）
-GET  /api/state           → { hasSave, stale, settled, roundOver, state, round, isGM }
+GET  /api/state           → { hasSave, stale, settled, dead, roundOver, state, round, isGM,
+                              career, recent }   // career = 跨轮累计；recent = 最近 5 轮上榜
+                           `?lobby=1` 省掉完整快照（约 3KB），大厅只要 hasSave/dead/career/recent
 POST /api/newgame         { name } → 开新角色（同一轮死了会被拒）
 POST /api/action          { action, payload } → { ok, msg, state, round, achievements }
 GET  /api/poll?since=&state=0|1 → **合并轮询**：聊天 + （可选）完整快照。
@@ -658,7 +675,8 @@ POST /api/admin/logs/clear  → 清空日志缓冲
 POST /api/admin/logs/probe  → 立即采一次内存
 POST /api/admin/reload      → 全量重读磁盘（手改存档后用）
 POST /api/admin/loadone     { username } → 只重读一个玩家
-POST /api/admin/chat/clear
+POST /api/admin/chat/clear  { match? } → 不带 match 清空全部；带 match 只删含该关键词的消息
+                            （发错公告时用，不用把整屏聊天清掉）
 GET  /api/admin/bagview?u=
 GET  /api/admin/playerdetail?u=
 POST /api/admin/settings  → 14 个字段，白名单校验
@@ -738,6 +756,28 @@ tipTarget                 // 悬浮提示当前目标
 - **红点 + 光晕** = 黑市（限时，`S.market.zone` 匹配时画）
 - **蓝点** = 佣兵招募点（常驻，`META.merc.zone` 匹配时画）
 - 鼠标悬停的 `#mapTip` 会多出一行红/蓝强提醒（`★ 黑市在此 · 剩 04:08`）
+
+### 大厅（`#lobbyScreen`，第 46 轮）
+
+**登录页 `#loginScreen` 和等待页 `#waitScreen` 已经删掉**，合成一个大厅：
+
+```
+#lobbyScreen
+  .lobby-head    品牌 + 轮次状态（进行中/已结束/等待开局）+ 倒计时 + 在场人数
+  .lobby-main    #lobbyBoard 看板（历史轮次 top3）｜ #lobbyAch 成就榜（每轮称号）
+                 + 「怎么玩」四格说明（新玩家第一眼要知道的）
+  .lobby-foot    #lobbyLogin（未登录：账号密码）/ #lobbyMe（已登录：状态 + 战报 + 按钮）
+```
+
+- 数据来自 `GET /api/lobby`（公开），**每 3 秒自己刷**，不用再点「刷新」
+- **轮询走 `?lite=1`**（194 字节），只有轮次 id/state 变了才重新拉全量（8063 字节）
+- `hasSave` / `dead` 由服务端给标记，不要从 `state.char` 推 —— 轻量轮询没有 `state`
+- 榜单有内容签名（`boardSig`/`achSig`），**内容没变就不重建 innerHTML** ——
+  否则轮询会把鼠标底下的元素换掉，悬浮窗直接消失
+- 称号 chip 用 `data-hint`，`initHints()` 是**事件委托**（动态元素才绑得上）
+- `lobbyState` 存 `/api/state` 的结果，用来判断「加入本局 / 进入游戏 / 你出局了」
+- 战报（`st.report`）从结算页搬到这里，常驻在底部
+- 登录表单的 ID 没变（`#inUser` `#inPass` `#btnAuth` `.tab`），处理器照旧能用
 
 ### 三个界面层
 
@@ -1226,51 +1266,39 @@ MEM_BUF                  // 每 5 秒一次内存采样，保留 120 条
 
 ## 11. 测试
 
-```bash
-node test.js        # 数据完整性（64区块/147物品/90配方引用/掉落引用）+ 20 局平衡模拟
-node test2.js       # 人质成功率 / 挑逗 / 成就判定 / BOSS / 无敌 / 金币
-node test3.js       # 状态道具 / 中毒掉血 / 冻结 / 七娃概率 / 刘颖概率 / 掉落引用
-node test4.js       # 耐久/改装/NPC/配方/精力机制/摊主换物/批量吃药/合成数量/强化/射击模式/对敌道具/勾选丢弃/智力门槛/时长
-node api-test2.js   # 轮次 / 商店 / 聊天 / GM / 交易 / 后台基础
-node api-test3.js   # 后台统计 / 批量操作 / 代发 GM / 新设置项是否生效
-node api-test4.js   # NPC 接口 / 改装接口 / CSV 导出（含 BOM 校验）
-```
-
-**新增的功能测试**（需要服务器）：
+> ⚠️ **测试脚本已从工作目录删除**（2026-10-23，用户要求只保留运行必需的文件）。
+> 九套游戏测试还在 git 历史里，需要时恢复：
 
 ```bash
-node chat-test.js     # 聊天 2 秒冷却（拦/放行/按账号隔离）+ 输入净化 + GM 不受限
-node feature-test.js  # 黑市价目 / 买卖 / 收摊 / 佣兵三档 / 拒绝分支 / 战报三行
-node admin-test.js    # 27 个后台接口全量体检（含 5xx 检测、慢请求检测）
+git checkout HEAD -- test.js test2.js test3.js test4.js \
+  api-test2.js api-test3.js api-test4.js pvp-test.js ui-test.js
 ```
 
-**第八套：玩家对战**（需要服务器）：
+### 恢复后能跑的九套
 
-```bash
-node pvp-test.js    # 同区块遭遇 / 打赢真的打伤对方 / 不同区块不触发 / GM 隐身
+| 脚本 | 查什么 |
+|---|---|
+| `test.js` | 数据完整性（64 区块 / 物品 / 配方引用 / 掉落引用）+ 20 局平衡模拟 |
+| `test2.js` | 人质成功率 / 挑逗 / 成就判定 / BOSS / 无敌 / 金币 |
+| `test3.js` | 状态道具 / 中毒掉血 / 冻结 / 七娃概率 / 刘颖概率 / 掉落引用 |
+| `test4.js` | 耐久 / 改装 / NPC / 配方 / 精力 / 强化 / 射击模式 / 对敌道具 / 智力门槛 |
+| `api-test2.js` | 轮次 / 商店 / 聊天 / GM / 交易 / 后台基础 |
+| `api-test3.js` | 后台统计 / 批量操作 / 代发 GM / 设置项是否生效 |
+| `api-test4.js` | NPC 接口 / 改装接口 / CSV 导出（含 BOM 校验） |
+| `pvp-test.js` | 玩家对战：同区块遭遇 / 打伤对方 / 不同区块不触发 / GM 隐身 |
+| `ui-test.js` | 界面回归（需 playwright-core + 本机 Chrome） |
+
+### 另外三套（已丢失，需要重写）
+
+`chat-test.js`（聊天冷却/净化）、`feature-test.js`（黑市/佣兵/战报）、`admin-test.js`（27 个后台接口体检）
+当时写在临时目录、**没有进过 git**，瘦身时一并没了。要重写的话照这个结构：
+
+```js
+// 1) 起一个隔离容器（别在线上跑破坏性接口）
+// 2) 注册临时账号 → 打接口 → 断言 → 删账号
 ```
 
-**第九套：界面状态机**（需要服务器 + playwright-core）：
-
-```bash
-NODE_PATH="$HOME/.workbuddy-ai/binaries/node/workspace/node_modules" \
-  node ui-test.js
-```
-
-覆盖前八套测不到的东西：Enter 探索、满包开箱不卡死、浮层关闭后回到场景、**弹窗被强行隐藏后 1 秒自愈**、
-满状态跑马灯、精力 0 不死、道具面板数量下拉与提示同步、排行榜历史 ID 不重叠、**七娃胜利 → 结算 → 等待区刷新不回弹**、**合成台背包满时按钮变「背包满」且点了没产出**。
-它靠「直接改存档把角色钉在某个场景」来避免等随机事件，所以稳定可复现。
-
-**必须全绿才算改完。** `api-test*` / `ui-test` / `pvp-test` 需要服务器在跑（`node server.js`）。
-
-截图验证（需要 playwright-core，复用系统 Chrome）：
-
-```bash
-NODE_PATH="$HOME/.workbuddy-ai/binaries/node/workspace/node_modules" \
-  node shot6.js
-```
-
----
+**测试环境必须用容器**，原因见踩坑 #52（fsync 在 bind mount 上会挂死）和 `.dockerignore` 会挡掉测试文件。
 
 ## 12. 代码风格
 

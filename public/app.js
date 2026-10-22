@@ -14,7 +14,7 @@ let craftCat = '全部';
 let chatCh = 'info';   // info = 个人日志 + 公共频道
 let chatSince = 0;
 let chatMsgs = [];
-let rankTimer = null, pollTimer = null, tickTimer = null, waitTimer = null;
+let rankTimer = null, pollTimer = null, tickTimer = null, lobbyTimer = null;
 
 const canvas = $('#map');
 const ctx = canvas.getContext('2d');
@@ -38,7 +38,32 @@ let lastToastMsg = '', lastToastAt = 0;
 // 提示条贴着地图下沿显示。
 // 以前写死 bottom:40px，会压住区域栏的按钮，而且离「事情发生的地方」（地图）太远。
 // 等待/结算界面没有地图，退回底部居中。
+// 提示条定位：**不能盖住能点的东西**。
+// 1) 有弹窗（战斗/遭遇/背包…）→ 贴弹窗框下沿；下面放不下就翻到框上面
+// 2) 没弹窗 → 贴地图下沿（不碰区域栏的按钮）
+// 3) 等待/结算界面没有地图 → 退回屏幕底部
 function positionToast(el) {
+  const h = el.offsetHeight || 44;
+  const w = el.offsetWidth || 320;
+  // .toast 有 translateX(-50%)，left 必须留出半个宽度才不会出屏
+  const clampX = cx => Math.round(Math.max(w / 2 + 8, Math.min(window.innerWidth - w / 2 - 8, cx)));
+
+  const modal = $('#modal');
+  const box = $('#modalBox');
+  if (modal && !modal.classList.contains('hidden') && box) {
+    const r = box.getBoundingClientRect();
+    el.style.bottom = 'auto';
+    el.style.left = clampX(r.left + r.width / 2) + 'px';
+    const below = r.bottom + 10;
+    if (below + h <= window.innerHeight - 8) {
+      el.style.top = Math.round(below) + 'px';
+    } else {
+      const above = r.top - h - 10;
+      el.style.top = Math.round(above >= 8 ? above : window.innerHeight - h - 6) + 'px';
+    }
+    return;
+  }
+
   const wrap = document.querySelector('.map-wrap');
   const r = wrap ? wrap.getBoundingClientRect() : null;
   if (!r || !r.height) {
@@ -47,8 +72,7 @@ function positionToast(el) {
     return;
   }
   el.style.bottom = 'auto';
-  el.style.left = Math.round(r.left + r.width / 2) + 'px';
-  const h = el.offsetHeight || 44;
+  el.style.left = clampX(r.left + r.width / 2) + 'px';
   el.style.top = Math.round(Math.max(8, r.bottom - h - 8)) + 'px';
 }
 
@@ -63,6 +87,8 @@ function toast(msg) {
   d.textContent = msg;
   document.body.appendChild(d);
   positionToast(d);
+  // 弹窗的 margin-top 是算出来的，可能晚一帧才定下来 —— 再校一次
+  requestAnimationFrame(() => { if (d.isConnected) positionToast(d); });
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => d.remove(), 2400);
 }
@@ -422,7 +448,7 @@ document.querySelectorAll('.tab').forEach(t => {
     document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
     t.classList.add('active');
     authMode = t.dataset.tab;
-    $('#btnAuth').textContent = authMode === 'login' ? '进入油田' : '注册并进入';
+    $('#btnAuth').textContent = authMode === 'login' ? '进入游戏' : '注册并进入游戏';
     $('#authMsg').textContent = '';
   };
 });
@@ -452,17 +478,17 @@ function logout() {
   localStorage.removeItem('br_user');
   clearTimers();
   $('#gameScreen').classList.add('hidden');
-  $('#waitScreen').classList.add('hidden');
-  $('#loginScreen').classList.remove('hidden');
   $('#modal').classList.add('hidden');
+  lobbyState = null;
+  showLobby(null);
 }
 
 function clearTimers() {
   if (rankTimer) clearInterval(rankTimer);
   if (pollTimer) clearInterval(pollTimer);
   if (tickTimer) clearInterval(tickTimer);
-  if (waitTimer) clearInterval(waitTimer);
-  rankTimer = pollTimer = tickTimer = waitTimer = null;
+  if (lobbyTimer) clearInterval(lobbyTimer);
+  rankTimer = pollTimer = tickTimer = lobbyTimer = null;
 }
 
 $('#btnLogout').onclick = () => { api('/api/logout', {}).catch(() => {}); logout(); };
@@ -479,13 +505,12 @@ async function enterGame() {
   ROUND = st.round;
   IS_GM = !!st.isGM;
 
-  $('#loginScreen').classList.add('hidden');
   $('#tUser').textContent = USERNAME;
 
   if (st.hasSave && st.state) {
     S = st.state;
     if (S.char.alive === false || S.scene === 'dead') {
-      showDeadWait();
+      showDeadWait(st);
       startTimers();
       return;
     }
@@ -500,99 +525,390 @@ async function enterGame() {
     });
   } else {
     S = null;
-    showWait(st);
+    showLobby(st);
   }
   requestAnimationFrame(loop);
 }
 
 function showGame() {
-  if (waitTimer) { clearInterval(waitTimer); waitTimer = null; }
+  if (lobbyTimer) { clearInterval(lobbyTimer); lobbyTimer = null; }
   roundOverShown = false;   // 新一轮开始了，允许再次触发结算切换
-  $('#waitScreen').classList.add('hidden');
+  $('#lobbyScreen').classList.add('hidden');
   $('#gameScreen').classList.remove('hidden');
 }
 
-function showWait(st) {
-  $('#gameScreen').classList.add('hidden');
-  $('#waitScreen').classList.remove('hidden');
-  const r = ROUND || st.round || {};
-  const body = $('#waitBody');
-  const actions = $('#waitActions');
-  body.innerHTML = '';
-  actions.innerHTML = '';
+// ================= 大厅（登录 + 看板 + 成就榜 + 开局状态） =================
+// 以前这里是个只能点「刷新」的死界面：新玩家不知道这游戏在干嘛、上一轮谁赢了、
+// 现在能不能进。现在把登录、看板、成就榜、开局状态和倒计时全放到一页里。
+let lobbyData = null;      // /api/lobby 的结果
+let lobbyState = null;     // /api/state 的结果（判断有没有存档）
+let boardSig = '';         // 看板内容签名，没变就不重建 DOM
+let achSig = '';           // 成就榜内容签名
 
-  if (r.state === 'idle') {
-    $('#waitTitle').textContent = '等待开局';
-    $('#waitSub').textContent = '这一轮还没有开始。等管理员开局，或者你来做第一个进去的人。';
-    body.innerHTML = `<div class="hint" style="text-align:center;line-height:2">
-      64 个区块，一个出口。<br>广华寺的钟楼上有个人，一直在念编号。<br>
-      ${META ? '最终 BOSS：' + esc(META.bossName) : ''}</div>`;
-    addWaitBtn('加入对局', 'primary', async () => {
-      const j = await api('/api/newgame', { name: USERNAME });
-      if (!j.ok) { toast(j.msg || '失败'); return; }
-      S = j.state; ROUND = j.round; showGame(); render(); startTimers();
-    });
-    addWaitBtn('刷新', '', () => location.reload());
-  } else if (r.state === 'ended') {
-    $('#waitTitle').textContent = '本轮结束';
-    const reasonTxt = { boss: '最终 BOSS 被击杀', sevenwa: '有人带着七娃离开了油田', wiped: '所有人都出局了', timeout: '时间到', manual: '被管理员结束' }[r.endReason] || '结束';
-    $('#waitSub').textContent = `第 ${r.id} 轮 · ${reasonTxt}`;
-    const rep = (st && st.report) || [];
-    const sum = (st && st.summary) || null;
-    const reportHtml = rep.length ? `
-      <div class="report-box">
-        <div class="report-title">战 报</div>
-        ${rep.map(l => `<p class="report-line">${esc(l)}</p>`).join('')}
-        ${sum ? `<div class="report-sum">${sum.turn} 回合 · ${sum.kills} 杀 · Lv.${sum.level} · ¥${sum.gold}</div>` : ''}
-      </div>` : '';
-    body.innerHTML = reportHtml + '<div class="hint" style="text-align:center;margin-top:14px">等待管理员开始下一轮。</div>';
-    addWaitBtn('看排行榜', '', () => openRankModal());
-    addWaitBtn('刷新', '', () => location.reload());
-  } else {
-    // running 但没存档 / 存档过期
-    $('#waitTitle').textContent = st.stale ? '新的一轮开始了' : '你还没进场';
-    $('#waitSub').textContent = `第 ${r.id} 轮进行中 · 剩余 ${fmtTime((r.extended ? r.hardEndsAt : r.endsAt) - Date.now())}`;
-    body.innerHTML = `<div class="hint" style="text-align:center;line-height:2">
-      ${st.stale ? `你在第 ${st.oldRound} 轮的角色已经作废，重新进场吧。` : '广播还在响，十号地空着。'}
-    </div>`;
-    addWaitBtn('重新开局', 'primary', async () => {
-      const j = await api('/api/newgame', { name: USERNAME });
-      if (!j.ok) { toast(j.msg || '失败'); return; }
-      S = j.state; ROUND = j.round; showGame(); render(); startTimers();
-    });
-  }
+// 胜负判定：reason 只说明「怎么结束的」，这里补上「算谁赢」和「为什么」
+// boss / sevenwa 有明确赢家 → 胜利；wiped 全灭 → 失败；
+// timeout 没人杀掉广播员也没人逃出去 → 时间到（不分胜负）；manual 是管理员中止
+const VERDICT = {
+  boss:    { v: '胜利', cls: 'win',  why: '广播员被击杀',  tip: '判定依据：有玩家杀掉了钟楼上的广播员，通关。' },
+  sevenwa: { v: '胜利', cls: 'win',  why: '七娃被带出油田', tip: '判定依据：有玩家带着七娃离开了油田，逃出去了。' },
+  wiped:   { v: '失败', cls: 'lose', why: '全员出局',      tip: '判定依据：所有玩家都出局了，没人活下来。' },
+  timeout: { v: '时间到', cls: 'time', why: '没人通关',    tip: '判定依据：时间耗尽，没人杀掉广播员，也没人带七娃离开。' },
+  manual:  { v: '中止', cls: 'void', why: '管理员结束',    tip: '被管理员手动结束，不计胜负。' },
+};
 
-  if (IS_GM) {
-    addWaitBtn('GM：开始新一轮', '', async () => {
-      const j = await api('/api/round/start', {});
-      toast(j.ok ? '已开始' : (j.msg || '失败'));
-      setTimeout(() => location.reload(), 600);
-    });
-  }
-
-  // 等待区自动刷新：管理员一开局，这里不用手动点刷新就能进
-  if (waitTimer) clearInterval(waitTimer);
-  waitTimer = setInterval(async () => {
-    try {
-      const s2 = await api('/api/state');
-      const changed = !ROUND || s2.round.id !== ROUND.id || s2.round.state !== ROUND.state;
-      if (s2.hasSave && s2.state) {
-        ROUND = s2.round; S = s2.state;
-        clearInterval(waitTimer); waitTimer = null;
-        showGame(); render(); startTimers();
-        return;
-      }
-      if (changed) { ROUND = s2.round; showWait(s2); }
-    } catch (e) { /* 网络抖动忽略 */ }
-  }, 6000);
+function fmtClock(ms) {
+  const t = Math.max(0, Math.round((ms || 0) / 1000));
+  const h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), sec = t % 60;
+  const p = n => String(n).padStart(2, '0');
+  return h > 0 ? `${h}:${p(m)}:${p(sec)}` : `${m}:${p(sec)}`;
 }
 
-function addWaitBtn(label, cls, fn) {
-  const b = document.createElement('button');
-  b.className = 'btn ' + cls;
-  b.textContent = label;
-  b.onclick = fn;
-  $('#waitActions').appendChild(b);
+// 看板上的时间：同一天只显示一次日期，跨天就各带日期
+function fmtHM(ts) {
+  const d = new Date(ts);
+  const p = n => String(n).padStart(2, '0');
+  return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+function fmtRange(start, end) {
+  if (!start && !end) return '';
+  if (!start) return `结束 ${fmtHM(end)}`;
+  if (!end) return `开始 ${fmtHM(start)}`;
+  const s = new Date(start), e = new Date(end);
+  const sameDay = s.toDateString() === e.toDateString();
+  const p = n => String(n).padStart(2, '0');
+  return sameDay
+    ? `${fmtHM(start)} → ${p(e.getHours())}:${p(e.getMinutes())}`
+    : `${fmtHM(start)} → ${fmtHM(end)}`;
+}
+
+// lite=true：只取轮次状态和在场人数。称号图鉴（4.5KB）是静态的，每 3 秒重发纯浪费。
+async function loadLobby(lite) {
+  try {
+    const j = await api('/api/lobby' + (lite ? '?lite=1' : ''));
+    if (j && j.ok) {
+      if (lite && lobbyData) {
+        lobbyData.now = j.now;
+        lobbyData.round = j.round;
+        lobbyData.online = j.online;
+      } else {
+        lobbyData = j;
+      }
+    }
+  } catch (e) { /* 断网时保留上一次的数据，别把页面清空 */ }
+  return lobbyData;
+}
+
+function renderLobbyHead() {
+  const st = $('#lobbyState'), tm = $('#lobbyTimer');
+  if (!st) return;
+  if (!lobbyData) { st.textContent = '连接中…'; st.className = ''; tm.textContent = ''; return; }
+  const r = lobbyData.round;
+  if (r.state === 'running') {
+    st.textContent = `第 ${r.id} 轮 · 进行中`;
+    st.className = 'lh-live';
+    tm.textContent = `剩 ${fmtClock(r.leftMs)} · ${lobbyData.online} 人在场`;
+  } else if (r.state === 'ended') {
+    st.textContent = `第 ${r.id} 轮 · 已结束`;
+    st.className = 'lh-over';
+    tm.textContent = r.nextInMs > 0 ? `下一轮 ${fmtClock(r.nextInMs)} 后` : '等待管理员开下一轮';
+  } else {
+    st.textContent = '等待开局';
+    st.className = '';
+    tm.textContent = r.nextInMs > 0 ? `${fmtClock(r.nextInMs)} 后开始` : '管理员随时会开';
+  }
+}
+
+function renderLobbyBoard() {
+  const box = $('#lobbyBoard');
+  if (!box) return;
+  const list = (lobbyData && lobbyData.history) || [];
+  if (!list.length) {
+    box.innerHTML = '<div class="hint">还没有历史对局。第一轮打完，这里就会有记录。</div>';
+    boardSig = '';
+    return;
+  }
+  const sig = JSON.stringify(list);
+  if (sig === boardSig) return;      // 内容没变就别重建，否则会打断悬浮/选中状态
+  boardSig = sig;
+
+  // 顶部小计：近 N 轮赢了几次、输了几次
+  const tally = { win: 0, lose: 0, time: 0, void: 0 };
+  for (const h of list) {
+    const vd = VERDICT[h.reason] || VERDICT.manual;
+    tally[vd.cls]++;
+  }
+  const sub = $('#boardSub');
+  if (sub) {
+    sub.textContent = `胜 ${tally.win} · 败 ${tally.lose}` + (tally.time ? ` · 时间到 ${tally.time}` : '');
+  }
+
+  box.innerHTML = list.map(h => {
+    const vd = VERDICT[h.reason] || { v: '结束', cls: 'void', why: h.reason || '结束', tip: '' };
+    const durMin = (h.startedAt && h.endedAt) ? Math.round((h.endedAt - h.startedAt) / 60000) : 0;
+    // 前三名：名次做成小方块徽章，分数后面明确写「分」
+    const top = (h.top || []).slice(0, 3).map((p, i) =>
+      `<span class="tk"><em class="rk r${i + 1}">${i + 1}</em><span class="nm">${esc(p.name)}</span><b>${p.score}</b><i>分</i></span>`
+    ).join('');
+    return `<div class="brow">
+      <div class="br-head">
+        <span class="vd vd-${vd.cls}" data-hint="${esc(vd.tip)}">${esc(vd.v)}</span>
+        <span class="br-id">#${h.roundId}</span>
+        <span class="br-reason">${esc(vd.why)}</span>
+        <span class="br-meta">
+          ${durMin ? `<span>时长 ${durMin} 分</span>` : ''}
+          <span>${h.players} 人参与</span>
+          <span class="br-time">${esc(fmtRange(h.startedAt, h.endedAt))}</span>
+        </span>
+      </div>
+      <div class="br-top">${top || '<i class="dim">没有记录</i>'}</div>
+      <div class="br-detail">${(h.top || []).map((p, i) => `
+        <div class="bd-row">
+          <em class="bd-rk${i === 0 ? ' bd1' : ''}">${i + 1}</em>
+          <span class="bd-nm">${esc(p.name)}</span>
+          <b class="bd-sc">${p.score || 0}</b><i class="bd-unit">分</i>
+          <span class="bd-meta">${p.kills || 0} 杀 · ${p.turn || 0} 回合${p.boss ? ' · 杀过 BOSS' : ''}${p.alive ? '' : ' · 出局'}</span>
+        </div>`).join('') || '<div class="bd-row dim">没有记录</div>'}</div>
+      <div class="bd-tip">点击展开全部 ${(h.top || []).length} 人</div>
+    </div>`;
+  }).join('');
+}
+
+function renderLobbyAch() {
+  const box = $('#lobbyAch');
+  if (!box) return;
+  const cat = (lobbyData && lobbyData.catalog) || [];
+  if (!cat.length) {
+    box.innerHTML = '<div class="hint">称号数据加载中…</div>';
+    achSig = '';
+    return;
+  }
+  const un = new Set((lobbyData && lobbyData.unlocked) || []);
+  const cnts = (lobbyData && lobbyData.titleCount) || {};
+  const sig = cat.length + '|' + [...un].sort().join(',') + '|' + JSON.stringify(cnts);
+  if (sig === achSig) return;
+  achSig = sig;
+
+  const sub = $('#achSub');
+  if (sub) sub.textContent = `已解锁 ${un.size} / ${cat.length}`;
+
+  const cats = (lobbyData && lobbyData.cats) || [];
+  let html = '';
+  for (const c of cats) {
+    const items = cat.filter(a => a.c === c);
+    if (!items.length) continue;
+    const got = items.filter(a => un.has(a.id)).length;
+    html += `<div class="ach-cat"><span>${esc(c)}</span><em>${got}/${items.length}</em></div>`;
+    html += '<div class="ach-grid">' + items.map(a => {
+      const has = un.has(a.id);
+      // 神秘类的没解锁就藏名字，留个念想
+      const hidden = !has && a.c === '神秘';
+      const stars = '★'.repeat(a.t) + '☆'.repeat(Math.max(0, 4 - a.t));
+      const cnt = cnts[a.id] || 0;
+      const tip = hidden
+        ? `???\n${a.c} · ${stars}\n还没有人拿到过这个称号。`
+        : `${a.n}\n${a.c} · ${stars}\n${a.d}\n条件：${a.h}\n${cnt ? `已解锁 · ${cnt} 人拿过` : '还没人拿过'}`;
+      return `<div class="achrow${has ? ' got' : ''}" data-id="${esc(a.id)}" data-hint="${esc(tip)}">
+        <span class="an">${esc(hidden ? '???' : a.n)}</span>
+        <span class="as">${stars}</span>
+      </div>`;
+    }).join('') + '</div>';
+  }
+  box.innerHTML = html;
+}
+
+// 轮次刚结束时在顶部横一条：这是「这个服还活着」的最直接信号
+function renderLobbyBanner() {
+  const el = $('#lobbyBanner');
+  if (!el) return;
+  const d = lobbyData;
+  const r = d && d.round;
+  if (!r || r.state !== 'ended' || !r.endedAt) { el.classList.add('hidden'); return; }
+  const ago = (d.now || Date.now()) - r.endedAt;
+  if (ago > 90000) { el.classList.add('hidden'); return; }   // 只挂 90 秒，之后交给看板
+  const vd = VERDICT[r.endReason] || { v: '结束', cls: 'void', why: '' };
+  const h0 = (d.history || [])[0];
+  const champ = h0 && h0.roundId === r.id ? (h0.top || [])[0] : null;
+  el.className = `lobby-banner lb-${vd.cls}`;
+  el.innerHTML = `<b>第 ${r.id} 轮结束</b>`
+    + `<span class="lb-vd">${esc(vd.v)}</span>`
+    + `<span class="lb-why">${esc(vd.why)}</span>`
+    + (champ ? `<span class="lb-champ">冠军 ${esc(champ.name)} · ${champ.score} 分</span>` : '')
+    + `<span class="lb-next">${r.nextInMs > 0 ? fmtClock(r.nextInMs) + ' 后开下一轮' : '等管理员开下一轮'}</span>`;
+}
+
+function renderLobbyMe() {
+  const login = $('#lobbyLogin'), me = $('#lobbyMe');
+  if (!login || !me) return;
+  const loggedIn = !!TOKEN;
+  login.classList.toggle('hidden', loggedIn);
+  me.classList.toggle('hidden', !loggedIn);
+  const uEl = $('#lobbyUser');
+  if (uEl) uEl.textContent = loggedIn ? USERNAME : '';   // 顶栏用户名（账号栏移到上面后可能没有这个元素）
+  if (!loggedIn) return;
+
+  const r = (lobbyData && lobbyData.round) || ROUND || {};
+  // 注意：大厅轮询用 ?lobby=1，不带完整快照，所以这里只能看 hasSave / dead 两个标记
+  const hasSave = !!(lobbyState && lobbyState.hasSave);
+  const dead = !!(lobbyState && lobbyState.dead);
+  $('#lmUser').textContent = `你好，${USERNAME}`;
+  const hint = $('#lmHint'), acts = $('#lmActions'), rep = $('#lmReport');
+  acts.innerHTML = '';
+  rep.innerHTML = '';
+
+  const btn = (label, cls, fn) => {
+    const b = document.createElement('button');
+    b.className = 'btn ' + (cls || '');
+    b.textContent = label;
+    b.onclick = fn;
+    acts.appendChild(b);
+  };
+
+  if (r.state === 'running' && dead) {
+    hint.textContent = '你出局了 —— 这一轮还能看着别人打完';
+    if (META) btn('看排行榜', '', () => openRankModal());
+  } else if (r.state === 'running' && !hasSave) {
+    hint.textContent = `第 ${r.id} 轮正在进行 · ${lobbyData ? lobbyData.online : '?'} 人在场`;
+    btn('加入本局', 'primary', joinRound);
+  } else if (r.state === 'running' && hasSave) {
+    hint.textContent = `第 ${r.id} 轮正在进行`;
+    btn('进入游戏', 'primary', () => enterGame());
+  } else if (r.state === 'ended') {
+    hint.textContent = (lobbyData && lobbyData.round.nextInMs > 0)
+      ? `下一轮 ${fmtClock(lobbyData.round.nextInMs)} 后开始`
+      : '等待管理员开始下一轮';
+    if (META) btn('看排行榜', '', () => openRankModal());
+  } else {
+    hint.textContent = '还没有开局，你可以先开一轮';
+    btn('加入对局', 'primary', joinRound);
+  }
+
+  // 切换账号 = 退出登录回到大厅的登录框
+  const sw = document.createElement('button');
+  sw.className = 'btn tiny lm-switch';
+  sw.textContent = '切换账号';
+  sw.onclick = switchAccount;
+  acts.appendChild(sw);
+
+  // 个人跨轮战绩（career 是每轮结束时累加的）
+  const car = (lobbyState && lobbyState.career) || {};
+  const rec = (lobbyState && lobbyState.recent) || [];
+  const stEl = $('#lmStats'), rcEl = $('#lmRecent');
+  if (stEl) {
+    stEl.textContent = car.rounds
+      ? `累计 ${car.rounds} 轮 · 胜 ${car.wins || 0} 次 · 击杀 ${car.kills || 0} · 最好 ${car.bestScore || 0} 分`
+      : '还没有战绩，这一轮是你的第一场';
+  }
+  if (rcEl) {
+    rcEl.innerHTML = rec.length
+      ? '<em>最近：</em>' + rec.map(x => {
+          const vd = VERDICT[x.reason] || { v: '结束', cls: 'void' };
+          return `<span class="rc rc-${vd.cls}">${esc(vd.v)} #${x.roundId} · 第${x.rank}名 · ${x.score}分</span>`;
+        }).join('')
+      : '';
+  }
+
+  // 上一轮战报（结算页搬过来的，现在常驻在大厅底部）
+  const lines = (lobbyState && lobbyState.report) || [];
+  const sum = (lobbyState && lobbyState.summary) || null;
+  if (lines.length) {
+    rep.innerHTML = `<div class="report-box">
+      <div class="report-title">战 报</div>
+      ${lines.map(l => `<p class="report-line">${esc(l)}</p>`).join('')}
+      ${sum ? `<div class="report-sum">${sum.turn} 回合 · ${sum.kills} 杀 · Lv.${sum.level} · ¥${sum.gold}</div>` : ''}
+    </div>`;
+  }
+}
+
+async function switchAccount() {
+  try { await api('/api/logout', {}); } catch (e) { /* 网络问题也照样退出 */ }
+  TOKEN = ''; USERNAME = ''; S = null; IS_GM = false;
+  localStorage.removeItem('br_token');
+  localStorage.removeItem('br_user');
+  clearTimers();
+  lobbyState = null;
+  $('#lobbyLogin') && $('#inUser') && ($('#inUser').value = '');
+  $('#authMsg') && ($('#authMsg').textContent = '');
+  showLobby(null);
+}
+
+// 点称号 → 弹出「谁拿到的」
+function openTitleDetail(id) {
+  const cat = ((lobbyData && lobbyData.catalog) || []).find(a => a.id === id);
+  if (!cat) return;
+  const owners = ((lobbyData && lobbyData.titleOwners) || {})[id] || [];
+  const stars = '★'.repeat(cat.t) + '☆'.repeat(Math.max(0, 4 - cat.t));
+  openModal(cat.n, `
+    <div class="title-detail">
+      <div class="td-sub">${esc(cat.c)} · <span class="td-star">${stars}</span></div>
+      <p class="td-desc">${esc(cat.d)}</p>
+      <p class="td-cond">条件：${esc(cat.h)}</p>
+      <div class="td-owners">
+        ${owners.length
+          ? owners.map(o => `<span>${esc(o)}</span>`).join('')
+          : '<span class="dim">还没有人拿到</span>'}
+      </div>
+    </div>`, [{ label: '知道了', cls: 'primary', def: true, fn: closeModal }]);
+}
+
+// 大厅里的点击委托：看板行展开/收起，图鉴行看名单。
+// 绑在 document 上而不是元素上 —— 两个列表每次刷新都会重建 DOM。
+document.addEventListener('click', e => {
+  if (!e.target.closest) return;
+  const row = e.target.closest('#lobbyBoard .brow');
+  if (row) { row.classList.toggle('open'); return; }
+  const ach = e.target.closest('#lobbyAch .achrow');
+  if (ach && ach.dataset.id) openTitleDetail(ach.dataset.id);
+});
+
+async function joinRound() {
+  const j = await api('/api/newgame', { name: USERNAME });
+  if (!j.ok) { toast(j.msg || '失败'); return; }
+  S = j.state; ROUND = j.round; showGame(); render(); startTimers();
+}
+
+async function showLobby(st) {
+  $('#gameScreen').classList.add('hidden');
+  $('#lobbyScreen').classList.remove('hidden');
+  if (st) lobbyState = st;
+
+  // 已登录但没带状态（比如从游戏里返回大厅）→ 先拉一次。
+  // 否则按钮会先按上一次的 hasSave 渲染，3 秒后轮询回来才纠正，看起来像闪了一下。
+  if (TOKEN && !st) {
+    try {
+      lobbyState = await api('/api/state?lobby=1');
+      ROUND = lobbyState.round;
+    } catch (e) { /* 拉不到就等轮询 */ }
+  }
+
+  await loadLobby();
+  renderLobbyHead();
+  renderLobbyBanner();
+  renderLobbyBoard();
+  renderLobbyAch();
+  renderLobbyMe();
+
+  // 每 3 秒自己刷一次：倒计时、在场人数、新一轮是否开始，全都不用点「刷新」
+  if (lobbyTimer) clearInterval(lobbyTimer);
+  lobbyTimer = setInterval(async () => {
+    const before = lobbyData ? lobbyData.round.id + '|' + lobbyData.round.state : '';
+    await loadLobby(true);
+    const after = lobbyData ? lobbyData.round.id + '|' + lobbyData.round.state : '';
+    if (before !== after) {
+      await loadLobby(false);   // 轮次变了（开局/结束）才重新拉看板和图鉴
+      renderLobbyBoard();
+      renderLobbyAch();
+    }
+    renderLobbyHead();
+    renderLobbyBanner();
+    if (TOKEN) {
+      try {
+        const s2 = await api('/api/state?lobby=1');
+        lobbyState = s2;
+        ROUND = s2.round;
+        renderLobbyMe();
+      } catch (e) { /* 网络抖动忽略 */ }
+    }
+  }, 3000);
 }
 
 // 轮次结束 / 存档作废 → 立刻切到结算（等待）画面。
@@ -607,7 +923,7 @@ function roundOverTo(st) {
   ROUND = (st && st.round) || ROUND;
   clearTimers();
   closeModal(true);
-  showWait(st || { round: ROUND });
+  showLobby(st || { round: ROUND });
   if (wasPlaying) toast('本轮结束，正在结算…');
 }
 
@@ -2014,17 +2330,8 @@ function renderDead() {
   ], true);
 }
 
-function showDeadWait() {
-  $('#gameScreen').classList.add('hidden');
-  $('#waitScreen').classList.remove('hidden');
-  $('#waitTitle').textContent = '你出局了';
-  $('#waitSub').textContent = ROUND ? `第 ${ROUND.id} 轮还在进行 · 剩余 ${fmtTime((ROUND.extended ? ROUND.hardEndsAt : ROUND.endsAt) - Date.now())}` : '';
-  $('#waitBody').innerHTML = '<div class="hint" style="text-align:center;line-height:2">广播里念到了你的编号。<br>你可以看着别人打完，等下一轮再来。</div>';
-  const actions = $('#waitActions');
-  actions.innerHTML = '';
-  addWaitBtn('看排行榜', 'primary', () => openRankModal());
-  addWaitBtn('刷新', '', () => location.reload());
-}
+// 出局后回大厅：底部会显示「你出局了」+ 上一轮战报，看板照样能看
+function showDeadWait(st) { showLobby(st || null); }
 
 // ================= 特殊角色 =================
 function renderSevenWa() {
@@ -2134,7 +2441,7 @@ async function settleAndWait() {
   try {
     const st = await api('/api/state');
     ROUND = st.round;
-    showWait(st);
+    showLobby(st);
   } catch (e) { location.reload(); }
 }
 
@@ -3317,24 +3624,38 @@ function openMerc() {
   const pop = document.createElement('div');
   pop.className = 'hint-pop';
   document.body.appendChild(pop);
-  document.querySelectorAll('[data-hint]').forEach(el => {
-    el.addEventListener('mouseenter', () => {
-      pop.textContent = el.dataset.hint || '';
-      pop.classList.add('show');
-      const r = el.getBoundingClientRect();
-      const w = 250;
-      // 水平：居中于目标，但不许超出视口
-      pop.style.left = Math.round(Math.max(8, Math.min(window.innerWidth - w - 12, r.left + r.width / 2 - w / 2))) + 'px';
-      // 垂直：先放下方；下方放不下就翻到上方，都放不下就贴边
-      pop.style.top = Math.round(r.bottom + 8) + 'px';
-      const ph = pop.offsetHeight || 84;
-      if (r.bottom + 8 + ph > window.innerHeight - 8) {
-        const above = r.top - ph - 8;
-        pop.style.top = Math.round(above >= 8 ? above : Math.max(8, window.innerHeight - ph - 8)) + 'px';
-      }
-    });
-    el.addEventListener('mouseleave', () => pop.classList.remove('show'));
+
+  // 用事件委托而不是逐个 addEventListener：
+  // 大厅的成就榜是每次刷新重建的，绑在元素上的监听会丢。
+  let cur = null;
+  function show(el) {
+    cur = el;
+    pop.textContent = el.dataset.hint || '';
+    pop.classList.add('show');
+    const r = el.getBoundingClientRect();
+    const w = 250;
+    // 水平：居中于目标，但不许超出视口
+    pop.style.left = Math.round(Math.max(8, Math.min(window.innerWidth - w - 12, r.left + r.width / 2 - w / 2))) + 'px';
+    // 垂直：先放下方；下方放不下就翻到上方，都放不下就贴边
+    pop.style.top = Math.round(r.bottom + 8) + 'px';
+    const ph = pop.offsetHeight || 84;
+    if (r.bottom + 8 + ph > window.innerHeight - 8) {
+      const above = r.top - ph - 8;
+      pop.style.top = Math.round(above >= 8 ? above : Math.max(8, window.innerHeight - ph - 8)) + 'px';
+    }
+  }
+  function hide() { cur = null; pop.classList.remove('show'); }
+
+  document.addEventListener('mouseover', e => {
+    const el = e.target.closest && e.target.closest('[data-hint]');
+    if (!el) return;
+    if (el !== cur) show(el);
   });
+  document.addEventListener('mouseout', e => {
+    const el = e.target.closest && e.target.closest('[data-hint]');
+    if (el && el === cur && !el.contains(e.relatedTarget)) hide();
+  });
+  window.addEventListener('scroll', hide, true);
 })();
 
 // ---------- 黑市 ----------
@@ -3804,5 +4125,6 @@ async function sendChat() {
   if (TOKEN) {
     try { await enterGame(); return; } catch (e) { /* 令牌失效 */ }
   }
-  $('#loginScreen').classList.remove('hidden');
+  // 没登录（或令牌失效）→ 直接进大厅，登录框就在大厅底部
+  await showLobby(null);
 })();
