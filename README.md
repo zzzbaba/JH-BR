@@ -12,6 +12,7 @@
 [![Items](https://img.shields.io/badge/物品-137_件-c8453a)](GAME_GUIDE.md#装备)
 [![Titles](https://img.shields.io/badge/称号-53_个-8b5cf6)](GAME_GUIDE.md#称号)
 [![Round](https://img.shields.io/badge/单局-30_分钟-0ea5e9)](#轮次)
+[![体验服](https://img.shields.io/badge/体验服-zzzbaba.fun%3A8123-c8453a)](http://zzzbaba.fun:8123/)
 
 [玩家说明书](GAME_GUIDE.md) · [开发上下文](AI_CONTEXT.md) · [开发日志](DEVLOG.md) · [部署](README-DEPLOY.md)
 
@@ -31,7 +32,9 @@
 
 ## 启动
 
-双击 `start.bat`，或命令行：
+**线上体验服：<http://zzzbaba.fun:8123/>** —— 不想自己搭就直接进这个。开发中，随时可能重启。
+
+本地跑，双击 `start.bat`，或命令行：
 
 ```bash
 node server.js
