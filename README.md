@@ -45,6 +45,34 @@ node server.js
 
 账号密码用 scrypt 加盐哈希存储，存档为本地 JSON 文件。
 
+## 大厅
+
+`/api/lobby` 一次返回开局前需要的全部数据；轮询走 `/api/lobby?lite=1`。
+
+| 模式 | 返回 | 体积 |
+|:---|:---|---:|
+| `?lite=1` | `round` + `online`（3 秒轮询用） | **194 字节** |
+| 完整 | 再加 `history`（最近 12 轮）+ 成就榜 | 约 8 KB |
+
+**为什么分两档**：称号图鉴是静态的 4.5 KB，3 秒发一次纯浪费。lite 只给客户端真正会变的那几个字段。
+
+`round` 字段：`id` / `state` / `endReason` / `startedAt` / `endsAt` / `nextStartAt` / `leftMs` / `nextInMs` / `winner`。
+
+**胜负判定**（`endReason`）：
+
+| 值 | 判定 | 条件 |
+|:---|:---|:---|
+| `boss` | 胜 | 广播员被击杀 |
+| `sevenwa` | 胜 | 七娃被带走 |
+| `wiped` | 败 | 全员出局 |
+| `timeout` | 时间到 | 时间耗尽，无人通关 |
+| `manual` | 中止 | 管理员手动结束，不计胜负 |
+
+**成就榜**：当前轮实时算（`roundTitles`）+ 历史轮次（`titleNames`，最多 8 轮）。
+老数据没有 `titleNames` 字段，所以当前轮必须单独补，否则刚上线那几天榜单是空的。
+
+**历史过滤**：`history` 里 `top` 为空的轮次（自动开轮产生的 0 人轮）直接丢掉，否则看板全是噪音。
+
 ## 轮次
 
 一局是一轮。
