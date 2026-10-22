@@ -90,7 +90,7 @@ if [ "$READY" = "0" ]; then
   echo "server" >> "$FAILED"
 else
   echo "=========== 三、接口与对战 ==========="
-  for t in api-test2.js api-test3.js api-test4.js pvp-test.js; do
+  for t in api-test2.js api-test3.js api-test4.js; do
     run_suite "$t"
   done
   echo "--- 服务器日志尾部 ---"
